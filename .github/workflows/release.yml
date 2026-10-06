@@ -22,17 +22,23 @@ jobs:
 
       - run: npm ci
 
-      - name: Installer bauen und veröffentlichen
-        run: npx electron-builder --win nsis --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Nur bauen – das Hochladen übernimmt der nächste Schritt in einem Rutsch.
+      # (electron-builder lädt Dateien parallel hoch und legt dabei gelegentlich zwei Releases an.)
+      - name: Installer bauen
+        run: npx electron-builder --win nsis --publish never
 
-      # Fester Download-Link (.../releases/latest/download/MoodleDesktop-Setup.exe) und blockmap für Differenz-Updates
-      - name: Zusatzdateien anhängen
+      # Ein Release mit allen Dateien: Installer, blockmap (Differenz-Updates), latest.yml (Auto-Update)
+      # und der Installer unter festem Namen für .../releases/latest/download/MoodleDesktop-Setup.exe
+      - name: Release veröffentlichen
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
           Copy-Item "out/MoodleDesktop-Setup-$version.exe" "out/MoodleDesktop-Setup.exe"
-          gh release upload "v$version" "out/MoodleDesktop-Setup.exe" "out/MoodleDesktop-Setup-$version.exe.blockmap" --clobber
+          gh release create "v$version" `
+            "out/MoodleDesktop-Setup-$version.exe" `
+            "out/MoodleDesktop-Setup-$version.exe.blockmap" `
+            "out/latest.yml" `
+            "out/MoodleDesktop-Setup.exe" `
+            --title "Moodle Desktop $version" --generate-notes
