@@ -990,6 +990,7 @@ async function mountViewer() {
         data, page: S.route.params.page || 1, zoom: 'fit', terms,
         onPage: (n, total) => { V.page = n; V.total = total; updateViewerBar(); },
         onSelection: (sel) => showSelBubble(sel),
+        onZoom: () => updateViewerBar(),
       });
       V.total = V.ctl.numPages;
       V.page = S.route.params.page || 1;
@@ -1001,6 +1002,14 @@ async function mountViewer() {
       V.page = S.route.params.page || 1;
       renderTextPages();
       if (V.page > 1) goToPage(V.page);
+      V.textZoom = 1;
+      host.onwheel = (e) => {
+        if (!e.ctrlKey) return;
+        e.preventDefault();
+        V.textZoom = Math.max(0.6, Math.min(2.5, V.textZoom * Math.exp(-e.deltaY * 0.0018)));
+        host.style.setProperty('--tp-zoom', V.textZoom);
+        updateViewerBar();
+      };
       host.onscroll = () => {
         const mid = host.getBoundingClientRect().top + host.clientHeight / 3;
         const el = [...host.querySelectorAll('.text-page')].find((p) => { const r = p.getBoundingClientRect(); return r.top <= mid && r.bottom >= mid; });
@@ -1041,6 +1050,7 @@ function updateViewerBar() {
   if (inp && document.activeElement !== inp) inp.value = V.page;
   if ($('#viewer-total')) $('#viewer-total').textContent = V.total || '…';
   if ($('#viewer-zoom-label') && V.ctl) $('#viewer-zoom-label').textContent = Math.round(V.ctl.scale * 100) + ' %';
+  if ($('#viewer-zoom-label') && !V.ctl && V.textZoom) $('#viewer-zoom-label').textContent = Math.round(V.textZoom * 100) + ' %';
   const chip = $('#ctx-page');
   if (chip) chip.textContent = `S. ${V.page}`;
 }
@@ -1593,7 +1603,8 @@ const actions = {
   'viewer-zoom': (el) => {
     if (!V.ctl) return;
     const z = el.dataset.z;
-    V.ctl.setZoom(z === 'fit' ? 'fit' : z === 'in' ? V.ctl.scale * 1.2 : V.ctl.scale / 1.2);
+    if (z === 'fit') V.ctl.setZoom('fit');
+    else V.ctl.zoomBy(z === 'in' ? 1.2 : 1 / 1.2);
     updateViewerBar();
   },
   'viewer-hit': (el) => { V.hitIdx = Number(el.dataset.i); goToPage(V.hits[V.hitIdx].page); },
@@ -1766,6 +1777,12 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     $('#viewer-q').focus();
     $('#viewer-q').select();
+  }
+  if (S.route.name === 'viewer' && (e.ctrlKey || e.metaKey) && V.ctl && ['+', '=', '-', '0'].includes(e.key)) {
+    e.preventDefault();
+    if (e.key === '0') V.ctl.setZoom('fit');
+    else V.ctl.zoomBy(e.key === '-' ? 1 / 1.2 : 1.2);
+    updateViewerBar();
   }
   if (S.route.name === 'viewer' && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) {
     if (e.key === 'PageDown' || e.key === 'ArrowRight') { e.preventDefault(); goToPage(V.page + 1); }

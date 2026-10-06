@@ -1,7 +1,7 @@
 {
   "name": "moodle-desktop",
   "productName": "Moodle Desktop",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Moodle Desktop-App mit lokaler Hintergrund-Synchronisation, PDF-Viewer, Volltextsuche und KI-Lernassistent (ChatGPT oder Claude)",
   "main": "src/main/main.js",
   "author": "Roman Benz",

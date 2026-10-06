@@ -7,7 +7,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL('../../node_modules/pdfjs-dist/bui
 const norm = (s) =>
   String(s || '').toLowerCase().replace(/ß/g, 'ss').replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u').normalize('NFD').replace(/[̀-ͯ]/g, '');
 
-export async function openPdf(host, { data, page = 1, zoom = 'fit', terms = [], onPage, onSelection }) {
+export async function openPdf(host, { data, page = 1, zoom = 'fit', terms = [], onPage, onSelection, onZoom }) {
   const res = (p) => new URL(`../../node_modules/pdfjs-dist/${p}/`, import.meta.url).href;
   const task = pdfjs.getDocument({
     data, isEvalSupported: false, enableXfa: false,
@@ -28,9 +28,11 @@ export async function openPdf(host, { data, page = 1, zoom = 'fit', terms = [], 
   let current = 1;
   let destroyed = false;
 
+  const MIN_SCALE = 0.3;
+  const MAX_SCALE = 5;
   const fitScale = () => Math.max(0.4, Math.min(3, (scroller.clientWidth - 48) / base.width));
   const setScale = (z) => {
-    scale = z === 'fit' ? fitScale() : Math.max(0.4, Math.min(4, z));
+    scale = z === 'fit' ? fitScale() : Math.max(MIN_SCALE, Math.min(MAX_SCALE, z));
   };
   setScale(zoom);
 
@@ -69,8 +71,8 @@ export async function openPdf(host, { data, page = 1, zoom = 'fit', terms = [], 
       const canvas = document.createElement('canvas');
       canvas.width = Math.floor(vp.width * dpr);
       canvas.height = Math.floor(vp.height * dpr);
-      canvas.style.width = `${Math.floor(vp.width)}px`;
-      canvas.style.height = `${Math.floor(vp.height)}px`;
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
       await pg.render({ canvas, viewport: vp, ...(dpr !== 1 ? { transform: [dpr, 0, 0, dpr, 0, 0] } : {}) }).promise;
       const tl = document.createElement('div');
       tl.className = 'textLayer';
@@ -136,7 +138,46 @@ export async function openPdf(host, { data, page = 1, zoom = 'fit', terms = [], 
   wrap.addEventListener('mouseup', onMouseUp);
 
   let resizeTimer = null;
+  let renderTimer = null;
   let zoomMode = zoom;
+
+  // Neu rendern erst, wenn das Zoomen kurz pausiert – bis dahin wird das alte Bild skaliert
+  function scheduleRender() {
+    clearTimeout(renderTimer);
+    renderTimer = setTimeout(() => pages.forEach((p) => isNear(p) && render(p)), 160);
+  }
+
+  // Zoomen um einen Bildschirmpunkt: die Stelle unter dem Mauszeiger bleibt stehen
+  function zoomAt(z, cx, cy) {
+    const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, z));
+    if (Math.abs(next - scale) < 0.001) return;
+    const sr = scroller.getBoundingClientRect();
+    if (cx == null) { cx = sr.left + sr.width / 2; cy = sr.top + sr.height / 2; }
+    let anchor = null;
+    for (const p of pages) {
+      const r = p.el.getBoundingClientRect();
+      if (cy <= r.bottom + 14) { anchor = { p, fx: (cx - r.left) / r.width, fy: (cy - r.top) / r.height }; break; }
+    }
+    zoomMode = 'custom';
+    scale = next;
+    layout();
+    if (anchor) {
+      const el = anchor.p.el;
+      scroller.scrollTop = el.offsetTop + anchor.fy * el.offsetHeight - (cy - sr.top);
+      scroller.scrollLeft = el.offsetLeft + anchor.fx * el.offsetWidth - (cx - sr.left);
+    }
+    scheduleRender();
+    onZoom && onZoom(scale);
+  }
+
+  // Strg + Mausrad bzw. Touchpad-Pinch (kommt als wheel mit ctrlKey)
+  function onWheel(e) {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    const step = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+    zoomAt(scale * Math.exp(-step * 0.0018), e.clientX, e.clientY);
+  }
+  scroller.addEventListener('wheel', onWheel, { passive: false });
   const ro = new ResizeObserver(() => {
     if (zoomMode !== 'fit') return;
     clearTimeout(resizeTimer);
@@ -154,6 +195,10 @@ export async function openPdf(host, { data, page = 1, zoom = 'fit', terms = [], 
       current = p.n;
       onPage && onPage(current, doc.numPages);
     },
+    zoomBy(f) {
+      zoomAt(scale * f);
+      return scale;
+    },
     setZoom(z) {
       zoomMode = z;
       const keep = current;
@@ -161,6 +206,7 @@ export async function openPdf(host, { data, page = 1, zoom = 'fit', terms = [], 
       layout();
       pages.forEach((p) => isNear(p) && render(p));
       api.goTo(keep);
+      onZoom && onZoom(scale);
       return scale;
     },
     highlight(terms) {
@@ -172,6 +218,8 @@ export async function openPdf(host, { data, page = 1, zoom = 'fit', terms = [], 
       io.disconnect();
       ro.disconnect();
       scroller.removeEventListener('scroll', onScroll);
+      scroller.removeEventListener('wheel', onWheel);
+      clearTimeout(renderTimer);
       task.destroy();
     },
   };

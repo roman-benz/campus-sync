@@ -13,9 +13,9 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -27,12 +27,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Fester Download-Link: .../releases/latest/download/MoodleDesktop-Setup.exe
-      - name: Installer unter festem Namen anhängen
+      # Fester Download-Link (.../releases/latest/download/MoodleDesktop-Setup.exe) und blockmap für Differenz-Updates
+      - name: Zusatzdateien anhängen
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
           Copy-Item "out/MoodleDesktop-Setup-$version.exe" "out/MoodleDesktop-Setup.exe"
-          gh release upload "v$version" "out/MoodleDesktop-Setup.exe" --clobber
+          gh release upload "v$version" "out/MoodleDesktop-Setup.exe" "out/MoodleDesktop-Setup-$version.exe.blockmap" --clobber

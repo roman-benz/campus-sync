@@ -637,7 +637,7 @@ h1, h2, h3, h4 { font-family: var(--font-display); margin: 0; line-height: 1.25;
 .vb-search .input { height: 32px; font-size: 13px; }
 .viewer-body { flex: 1; min-height: 0; display: flex; position: relative; }
 .viewer-scroll { flex: 1; overflow: auto; background: color-mix(in srgb, var(--bg) 70%, #8a929c 30%); }
-.pdf-pages { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 18px 12px 60px; }
+.pdf-pages { display: flex; flex-direction: column; align-items: safe center; gap: 14px; padding: 18px 12px 60px; width: max-content; min-width: 100%; box-sizing: border-box; }
 .pdf-page { position: relative; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.18), 0 6px 18px rgba(0,0,0,.12); border-radius: 3px; overflow: hidden; flex: none; }
 .pdf-page canvas { display: block; }
 .pdf-ph { position: absolute; inset: 0; display: grid; place-items: center; color: #b5bcc4; font-size: 28px; font-weight: 600; }
@@ -653,7 +653,7 @@ h1, h2, h3, h4 { font-family: var(--font-display); margin: 0; line-height: 1.25;
 .text-pages { max-width: 860px; margin: 0 auto; padding: 20px 16px 60px; display: flex; flex-direction: column; gap: 14px; }
 .text-page { padding: 18px 22px; }
 .tp-head { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
-.tp-body { white-space: pre-wrap; line-height: 1.6; overflow-wrap: anywhere; }
+.tp-body { white-space: pre-wrap; line-height: 1.6; overflow-wrap: anywhere; font-size: calc(14.5px * var(--tp-zoom, 1)); }
 mark { background: rgba(255, 196, 0, .45); color: inherit; border-radius: 3px; padding: 0 1px; }
 .viewer-hitlist { width: 300px; flex: none; overflow: auto; background: var(--surface); border-left: 1px solid var(--border); padding: 6px; }
 .hl-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; }

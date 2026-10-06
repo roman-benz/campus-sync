@@ -189,6 +189,15 @@ async function shots() {
   await run(`(() => { const sp = [...document.querySelectorAll('.textLayer span')].find((x) => x.textContent.includes('Resonanzfrequenz')); const r = document.createRange(); r.selectNodeContents(sp); const s = getSelection(); s.removeAllRanges(); s.addRange(r); sp.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); })()`);
   await wait(500);
   await snap('12-markiert');
+  // Strg + Mausrad über einer Stelle der Seite: Zoom um den Mauszeiger
+  const box = await run(`(() => { getSelection().removeAllRanges(); document.querySelector('#sel-bubble').hidden = true; const r = document.querySelector('.pdf-page[data-page="4"]').getBoundingClientRect(); return { x: Math.round(r.left + r.width * 0.25), y: Math.round(r.top + 140), before: V.ctl.scale }; })()`);
+  for (let i = 0; i < 5; i++) {
+    win.webContents.sendInputEvent({ type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: 120, wheelTicksY: 1, canScroll: true, modifiers: ['control'] });
+    await wait(80);
+  }
+  await wait(900);
+  console.log('ZOOM', box.before.toFixed(2), '->', (await run('V.ctl.scale')).toFixed(2), 'Label:', await run(`document.querySelector('#viewer-zoom-label').textContent`));
+  await snap('12b-zoom');
   await run(`if (document.querySelector('#claude').classList.contains('closed')) document.querySelector('.claude-toggle').click(); document.querySelector('[data-action=set-provider][data-v=chatgpt]').click()`);
   await wait(800);
   await snap('13-chatgpt-panel');
