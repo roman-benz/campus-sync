@@ -16,6 +16,7 @@ const DEFAULTS = {
   claudeModel: 'claude-opus-5',
   aiProvider: 'claude',
   chatgptModel: '',
+  aiEffort: 'balanced',
 };
 
 function file(name) {

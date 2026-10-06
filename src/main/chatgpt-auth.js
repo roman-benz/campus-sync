@@ -201,81 +201,110 @@ class ChatGPTAuth {
     }
     log(`Versuch ${attempt}: autorisiere mit ${reuse ? 'vergebener client_id ' + mask(prev.clientId) : 'dynamic_agent_client (neue Registrierung)'}, redirect_uri=${redirectUri}`);
 
+    // Rückruf abwarten. Die Antwort an den Browser wird erst nach dem Token-Tausch geschickt,
+    // damit dort das echte Ergebnis steht.
+    let browserRes = null;
+    const shutdown = () => {
+      // close() nimmt nur keine neuen Verbindungen mehr an. Browser halten aber Reserve-Verbindungen
+      // offen, über die sonst der Rückruf eines späteren Versuchs bei diesem alten Server landen würde.
+      server.close();
+      server.closeAllConnections();
+    };
+    const respond = (title, text, ok) => {
+      if (!browserRes) return;
+      browserRes.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', Connection: 'close' });
+      browserRes.end(page(title, text, ok));
+      browserRes = null;
+    };
+
     const callback = await new Promise((resolve, reject) => {
       let done = false;
-      const timer = setTimeout(() => finish(new Error('Zeitüberschreitung bei der Anmeldung')), 5 * 60 * 1000);
+      const timer = setTimeout(() => finish(Object.assign(new Error('Zeitüberschreitung bei der Anmeldung'), { code: 'timeout' })), 5 * 60 * 1000);
       const finish = (err, val) => {
         if (done) return;
         done = true;
         clearTimeout(timer);
         this.pending = null;
-        setTimeout(() => server.close(), 500);
         err ? reject(err) : resolve(val);
       };
       this.pending = { cancel: () => finish(Object.assign(new Error('Anmeldung abgebrochen'), { code: 'cancelled' })) };
       server.on('request', (req, res) => {
         const u = new URL(req.url, redirectUri);
         if (u.pathname !== CALLBACK_PATH || done) {
-          res.writeHead(404);
+          res.writeHead(404, { Connection: 'close' });
           return res.end();
         }
         const q = Object.fromEntries(u.searchParams);
         log(`Rückruf erhalten: ${Object.keys(q).join(', ')}${q.error ? ' error=' + q.error : ''}`);
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        browserRes = res;
         if (q.error) {
-          res.end(page('Anmeldung nicht abgeschlossen', 'Du kannst dieses Fenster schließen und es in Moodle Desktop erneut versuchen.', false));
+          respond('Anmeldung nicht abgeschlossen', 'Du kannst dieses Fenster schließen und es in Moodle Desktop erneut versuchen.', false);
           return finish(Object.assign(new Error(q.error_description || q.error), { code: q.error }));
         }
         if (q.state !== state || !q.code) {
-          res.end(page('Anmeldung fehlgeschlagen', 'Ungültige Antwort. Bitte erneut versuchen.', false));
+          respond('Anmeldung fehlgeschlagen', 'Ungültige Antwort. Bitte erneut versuchen.', false);
           return finish(new Error('Ungültiger OAuth-Rückruf'));
         }
-        res.end(page('Mit ChatGPT verbunden', 'Du kannst dieses Fenster schließen und zu Moodle Desktop zurückkehren.'));
         finish(null, q);
       });
       shell.openExternal(`${AUTH_URL}?${params}`);
+    }).catch((e) => {
+      shutdown();
+      throw e;
     });
 
-    // Neue Registrierung liefert die vergebene client_id im Rückruf – niemals dynamic_agent_client speichern
-    const clientId = callback.client_id && callback.client_id !== 'dynamic_agent_client' ? callback.client_id : reuse ? prev.clientId : null;
-    if (!clientId) throw new Error('Keine client_id von OpenAI erhalten');
-    if (!reuse || clientId !== prev.clientId) {
-      // Registrierung sofort sichern, damit ein erneuter Versuch dieselbe client_id nutzt
-      this.save({ clientId, hostId: this.hostId() });
-      log(`Neue client_id gespeichert: ${mask(clientId)}`);
-    }
-
-    const form = { grant_type: 'authorization_code', client_id: clientId, code: callback.code, code_verifier: verifier, redirect_uri: redirectUri, resource: RESOURCE };
-    let tok;
     try {
-      tok = await this.tokenRequest(form);
+      // Neue Registrierung liefert die vergebene client_id im Rückruf – niemals dynamic_agent_client speichern
+      const clientId = callback.client_id && callback.client_id !== 'dynamic_agent_client' ? callback.client_id : reuse ? prev.clientId : null;
+      if (!clientId) throw new Error('Keine client_id von OpenAI erhalten');
+      if (!reuse || clientId !== prev.clientId) {
+        // Registrierung sofort sichern, damit ein erneuter Versuch dieselbe client_id nutzt
+        this.save({ clientId, hostId: this.hostId() });
+        log(`Neue client_id gespeichert: ${mask(clientId)}`);
+      }
+
+      const form = { grant_type: 'authorization_code', client_id: clientId, code: callback.code, code_verifier: verifier, redirect_uri: redirectUri, resource: RESOURCE };
+      let tok;
+      try {
+        tok = await this.tokenRequest(form);
+      } catch (e) {
+        log(`Code-Tausch mit ${mask(clientId)} fehlgeschlagen: ${e.code || ''} ${e.message}`);
+        throw e;
+      }
+      log(`Tokens erhalten (scope=${tok.scope || callback.scope || '–'}, expires_in=${tok.expires_in})`);
+      const claims = await verifyIdToken(tok.id_token, { clientId, nonce });
+      const scope = tok.scope || callback.scope || '';
+      const acc = {
+        clientId,
+        sub: claims.sub,
+        email: claims.email || null,
+        name: claims.name || claims.email || null,
+        idToken: tok.id_token,
+        accessToken: tok.access_token,
+        refreshToken: tok.refresh_token,
+        expiresAt: Date.now() + (tok.expires_in || 3600) * 1000,
+        scope,
+        welcomed: !!(prev && prev.sub === claims.sub && prev.welcomed),
+      };
+      this.save(acc);
+      if (!scope.split(' ').includes(PLAN_SCOPE)) {
+        const e = new Error('Die Nutzung deines ChatGPT-Plans wurde nicht freigegeben (oder dein Plan ist dafür nicht berechtigt).');
+        e.code = 'no_plan_scope';
+        throw e;
+      }
+      log('Login erfolgreich');
+      respond('Mit ChatGPT verbunden', 'Du kannst dieses Fenster schließen und zu Moodle Desktop zurückkehren.', true);
+      return this.status();
     } catch (e) {
-      log(`Code-Tausch mit ${mask(clientId)} fehlgeschlagen: ${e.code || ''} ${e.message}`);
+      if (e.code === 'invalid_grant' && attempt === 1) {
+        respond('Einen Moment …', 'Moodle Desktop schließt die Anmeldung in einem neuen Tab ab. Dieses Fenster kannst du schließen.', true);
+      } else {
+        respond('Anmeldung fehlgeschlagen', 'Bitte in Moodle Desktop erneut versuchen.', false);
+      }
       throw e;
+    } finally {
+      shutdown();
     }
-    log(`Tokens erhalten (scope=${tok.scope || callback.scope || '–'}, expires_in=${tok.expires_in})`);
-    const claims = await verifyIdToken(tok.id_token, { clientId, nonce });
-    const scope = tok.scope || callback.scope || '';
-    const acc = {
-      clientId,
-      sub: claims.sub,
-      email: claims.email || null,
-      name: claims.name || claims.email || null,
-      idToken: tok.id_token,
-      accessToken: tok.access_token,
-      refreshToken: tok.refresh_token,
-      expiresAt: Date.now() + (tok.expires_in || 3600) * 1000,
-      scope,
-      welcomed: !!(prev && prev.sub === claims.sub && prev.welcomed),
-    };
-    this.save(acc);
-    if (!scope.split(' ').includes(PLAN_SCOPE)) {
-      const e = new Error('Die Nutzung deines ChatGPT-Plans wurde nicht freigegeben (oder dein Plan ist dafür nicht berechtigt).');
-      e.code = 'no_plan_scope';
-      throw e;
-    }
-    log('Login erfolgreich');
-    return this.status();
   }
 
   async tokenRequest(form) {

@@ -5,6 +5,7 @@ const { TOOL_SPECS, validateInput, instructions } = require('./ai-tools');
 
 const FALLBACK_MODELS = new Set(['claude-opus-5', 'claude-fable-5-1']);
 const NO_ADAPTIVE_THINKING = new Set(['claude-haiku-4-5']);
+const EFFORT = { fast: 'low', balanced: 'medium', thorough: 'high' };
 const TOOLS = TOOL_SPECS.map((t) => ({ ...t, eager_input_streaming: true }));
 
 class ClaudeAssistant {
@@ -61,7 +62,11 @@ class ClaudeAssistant {
         cache_control: { type: 'ephemeral' },
         messages: conv.messages,
       };
-      if (!NO_ADAPTIVE_THINKING.has(model)) params.thinking = { type: 'adaptive', display: 'summarized' };
+      if (!NO_ADAPTIVE_THINKING.has(model)) {
+        params.thinking = { type: 'adaptive', display: 'summarized' };
+        // „Schnell / Ausgewogen / Gründlich“ aus den Einstellungen (Haiku unterstützt effort nicht)
+        params.output_config = { effort: EFFORT[store.getSettings().aiEffort] || 'medium' };
+      }
       if (FALLBACK_MODELS.has(model)) {
         // Lehnt ein Sicherheitsklassifikator ab, beantwortet ein empfohlenes Ersatzmodell die Anfrage.
         params.betas = ['server-side-fallback-2026-07-01'];

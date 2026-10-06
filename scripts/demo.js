@@ -46,8 +46,9 @@ function seed() {
   const store = require('../src/main/store');
   const { safeName } = require('../src/main/sync');
   const downloadDir = path.join(root, 'Moodle');
-  store.setSettings({ siteUrl: SITE, downloadDir, syncIntervalMin: 240, notifications: false, runInBackground: false });
+  store.setSettings({ siteUrl: SITE, downloadDir, syncIntervalMin: 240, notifications: false, runInBackground: false, aiProvider: 'claude' });
   store.setSecret('moodleToken', 'demo-token');
+  store.setSecret('anthropicKey', 'sk-ant-demo-nur-anzeige');
 
   const now = Math.floor(Date.now() / 1000);
   const day = 86400;

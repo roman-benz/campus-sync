@@ -7,6 +7,9 @@ const { AuthRequiredError, log } = require('./chatgpt-auth');
 
 // Basis-URL nur für Tests überschreibbar
 const API_BASE = process.env.MOODLE_DESKTOP_OPENAI_BASE || 'https://api.openai.com/v1';
+const EFFORT = { fast: 'low', balanced: 'medium', thorough: 'high' };
+const FIRST_EVENT_TIMEOUT_MS = 90 * 1000;
+const IDLE_TIMEOUT_MS = 4 * 60 * 1000;
 const FUNCTIONS = TOOL_SPECS.map((t) => ({ type: 'function', name: t.name, description: t.description, parameters: t.input_schema, strict: false }));
 
 // Ausgabe-Elemente so zurückschicken, dass sie ohne serverseitige Speicherung gültig sind
@@ -26,6 +29,12 @@ function toInputItems(output) {
     }
   }
   return items;
+}
+
+// Standard: erstes Modell, das kein „Pro“-Modell ist – die denken oft minutenlang
+function defaultModel(list) {
+  const normal = list.find((m) => !/(^|[-_ ])pro\b/i.test(m.id + ' ' + m.name));
+  return (normal || list[0]).id;
 }
 
 class ChatGPTAssistant {
@@ -73,7 +82,7 @@ class ChatGPTAssistant {
     const wanted = store.getSettings().chatgptModel;
     const list = await this.models().catch(() => []);
     if (wanted && (!list.length || list.some((m) => m.id === wanted))) return wanted;
-    if (list.length) return list[0].id;
+    if (list.length) return defaultModel(list);
     throw new Error('Für deinen ChatGPT-Plan sind keine Modelle verfügbar.');
   }
 
@@ -95,8 +104,10 @@ class ChatGPTAssistant {
       conv.input.push({ type: 'message', role: 'user', content });
 
       const model = await this.pickModel();
+      const effort = EFFORT[store.getSettings().aiEffort] || 'medium';
       let authRetried = false;
       let rounds = 0;
+      log(`Anfrage: Modell=${model}, Aufwand=${effort}`);
 
       while (true) {
         if (++rounds > 25) throw new Error('Zu viele Werkzeugschritte – bitte die Frage eingrenzen.');
@@ -114,20 +125,42 @@ class ChatGPTAssistant {
         };
         if (!this.noReasoningOpts) {
           params.include = ['reasoning.encrypted_content'];
-          params.reasoning = { summary: 'auto' };
+          params.reasoning = { summary: 'auto', effort };
         }
 
         emit('turn-start', {});
         let response = null;
+        const items = []; // Ausgabe-Elemente aus output_item.done (falls response.completed sie nicht enthält)
+        let streamedText = '';
+        const t0 = Date.now();
+        let firstEvent = 0;
+        let events = 0;
+        let lastEvent = Date.now();
+        conv.timedOut = false;
+        // Wächter: ohne erstes Ereignis bzw. bei langer Funkstille abbrechen statt ewig zu warten
+        const watchdog = setInterval(() => {
+          const idle = Date.now() - lastEvent;
+          if ((!firstEvent && idle > FIRST_EVENT_TIMEOUT_MS) || idle > IDLE_TIMEOUT_MS) {
+            conv.timedOut = true;
+            conv.abort.abort();
+          }
+        }, 5000);
         try {
           const stream = await client.responses.create(params, { signal: conv.abort.signal });
           for await (const ev of stream) {
+            events++;
+            lastEvent = Date.now();
+            if (!firstEvent) firstEvent = lastEvent - t0;
             switch (ev.type) {
               case 'response.output_item.added':
                 if (ev.item.type === 'message') emit('text-start', {});
                 else if (ev.item.type === 'reasoning') emit('thinking-start', {});
                 break;
+              case 'response.output_item.done':
+                if (ev.item) items.push(ev.item);
+                break;
               case 'response.output_text.delta':
+                streamedText += ev.delta;
                 emit('text', { text: ev.delta });
                 break;
               case 'response.reasoning_summary_text.delta':
@@ -148,25 +181,38 @@ class ChatGPTAssistant {
             }
           }
         } catch (err) {
+          if (conv.timedOut && !conv.stopped) {
+            log(`Zeitüberschreitung nach ${Math.round((Date.now() - t0) / 1000)} s (erstes Ereignis: ${firstEvent ? firstEvent + ' ms' : 'keins'}, ${events} Ereignisse)`);
+            throw Object.assign(new Error('ChatGPT hat zu lange nicht geantwortet. Versuch es noch einmal, wähle ein schnelleres Modell oder stelle „Schnell“ ein.'), { code: 'timeout' });
+          }
           if (err instanceof OpenAI.AuthenticationError && !authRetried) {
             authRetried = true;
             const a = this.auth.account();
             if (a) this.auth.save({ ...a, expiresAt: 0 }); // Token erzwingen erneuern
             continue;
           }
-          if (err instanceof OpenAI.BadRequestError && !this.noReasoningOpts && /reasoning|include/i.test(err.message)) {
-            this.noReasoningOpts = true; // Modell ohne Reasoning-Optionen
+          if (err instanceof OpenAI.BadRequestError && !this.noReasoningOpts && /reasoning|include|effort/i.test(err.message)) {
+            log(`Modell lehnt Reasoning-Optionen ab – ohne erneut: ${String(err.message).slice(0, 200)}`);
+            this.noReasoningOpts = true;
             emit('retry', {});
             continue;
           }
           throw err;
+        } finally {
+          clearInterval(watchdog);
         }
         conv.abort = null;
-        // Erfolg erst nach response.completed
-        if (!response) throw new Error('Antwort wurde unterbrochen.');
 
-        conv.input.push(...toInputItems(response.output));
-        const calls = (response.output || []).filter((it) => it.type === 'function_call');
+        let output = response && Array.isArray(response.output) && response.output.length ? response.output : items;
+        if (!output.some((it) => it.type === 'message') && streamedText) {
+          output = [...output, { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: streamedText }] }];
+        }
+        log(`Antwort ${response ? 'abgeschlossen' : 'ohne Abschlussereignis'} nach ${((Date.now() - t0) / 1000).toFixed(1)} s, erstes Ereignis nach ${firstEvent} ms, ${events} Ereignisse, Ausgabe: ${output.map((it) => it.type).join(', ') || 'leer'}`);
+        // Erfolg nur mit Abschlussereignis oder tatsächlich empfangenem Inhalt
+        if (!response && !output.length) throw new Error('Antwort wurde unterbrochen.');
+
+        conv.input.push(...toInputItems(output));
+        const calls = output.filter((it) => it.type === 'function_call');
         if (!calls.length) {
           emit('done', { usage: response.usage, model: response.model });
           return;
@@ -223,4 +269,4 @@ class ChatGPTAssistant {
   }
 }
 
-module.exports = { ChatGPTAssistant };
+module.exports = { ChatGPTAssistant, defaultModel };

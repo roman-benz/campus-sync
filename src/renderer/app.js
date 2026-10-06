@@ -846,12 +846,7 @@ function renderSettings() {
       ${row('Mit Windows starten', 'Startet unsichtbar im Infobereich und synchronisiert automatisch', sw('startWithWindows', s.startWithWindows))}
     </div></div>`;
   } else if (tab === 'ai') {
-    const models = [
-      ['claude-opus-5', 'Claude Opus 5 – empfohlen'],
-      ['claude-sonnet-5', 'Claude Sonnet 5 – schneller & günstiger'],
-      ['claude-haiku-4-5', 'Claude Haiku 4.5 – am günstigsten'],
-      ['claude-fable-5-1', 'Claude Fable 5.1 – leistungsstärkstes Modell'],
-    ];
+    const models = CLAUDE_MODELS;
     const g = S.chatgpt || {};
     const p = prov();
     const pcard = (v, title, sub, ic, cls) => `<button class="prov-card ${p === v ? 'on' : ''}" data-action="set-provider" data-v="${v}"><div class="cp-logo ${cls}">${icon(ic)}</div><div><b>${title}</b><small>${sub}</small></div>${p === v ? `<span class="chip ok">${icon('check', 'sm')} Aktiv</span>` : ''}</button>`;
@@ -862,11 +857,12 @@ function renderSettings() {
           ${pcard('chatgpt', 'ChatGPT', 'Mit deinem Plus-/Pro-Plan – ohne API-Key', 'message', 'p-chatgpt')}
           ${pcard('claude', 'Claude', 'Mit eigenem Anthropic-API-Key', 'sparkles', 'p-claude')}
         </div>
+        ${row('Antwortstil', 'Schnell antwortet zügig, Gründlich denkt länger nach (gilt für beide Anbieter)', `<div class="segmented">${EFFORTS.map(([v, l]) => `<button class="${(s.aiEffort || 'balanced') === v ? 'on' : ''}" data-action="set-effort" data-v="${v}">${l}</button>`).join('')}</div>`)}
       </div></div>
       <div class="card"><div class="card-head"><h2>${icon('message')} ChatGPT</h2></div><div class="card-body">
         ${g.signedIn ? `
           ${row('Verbunden', `${esc(g.email || g.name || 'ChatGPT-Konto')} ${g.planUsage ? '<span class="chip ok">Plan-Nutzung aktiv</span>' : '<span class="chip warn">Plan-Nutzung nicht freigegeben</span>'}`, `<button class="btn sm" data-action="external" data-url="${MANAGE_USAGE_URL}">Nutzung verwalten</button><button class="btn sm ghost" data-action="chatgpt-logout">Abmelden</button>`)}
-          ${row('Modell', 'Modelle, die dein ChatGPT-Plan für Apps freigibt', S.gptModels && S.gptModels.length ? `<select class="select" style="width:260px" data-change="setting-str" data-key="chatgptModel">${S.gptModels.map((m) => `<option value="${esc(m.id)}" ${(s.chatgptModel || S.gptModels[0].id) === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>` : `<button class="btn sm" data-action="chatgpt-models">${icon('refresh', 'sm')} Modelle laden</button>`)}
+          ${row('Modell', 'Modelle, die dein ChatGPT-Plan für Apps freigibt', S.gptModels && S.gptModels.length ? `<select class="select" style="width:260px" data-change="setting-str" data-key="chatgptModel">${S.gptModels.map((m) => `<option value="${esc(m.id)}" ${gptSelectedModel() === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>` : `<button class="btn sm" data-action="chatgpt-models">${icon('refresh', 'sm')} Modelle laden</button>`)}
           ${row('Anderes Konto', 'Mit einem anderen ChatGPT-Konto anmelden', '<button class="btn sm ghost" data-action="chatgpt-switch">Konto wechseln</button>')}
           ${row('Protokoll', 'Technisches Protokoll der ChatGPT-Anmeldung (ohne Passwörter/Tokens)', '<button class="btn sm ghost" data-action="chatgpt-log">Protokoll öffnen</button>')}
         ` : `
@@ -1164,6 +1160,39 @@ async function runSearch(q) {
 }
 
 // ---------- KI-Panel (Claude oder ChatGPT) ----------
+const CLAUDE_MODELS = [
+  ['claude-opus-5', 'Claude Opus 5 – empfohlen'],
+  ['claude-sonnet-5', 'Claude Sonnet 5 – schneller & günstiger'],
+  ['claude-haiku-4-5', 'Claude Haiku 4.5 – am günstigsten'],
+  ['claude-fable-5-1', 'Claude Fable 5.1 – leistungsstärkstes Modell'],
+];
+const EFFORTS = [['fast', 'Schnell'], ['balanced', 'Ausgewogen'], ['thorough', 'Gründlich']];
+// Gleiche Regel wie im Hauptprozess: standardmäßig kein „Pro“-Modell (die denken oft minutenlang)
+function gptDefaultModel(list) {
+  const normal = (list || []).find((m) => !/(^|[-_ ])pro\b/i.test(m.id + ' ' + m.name));
+  return (normal || (list || [])[0] || {}).id || '';
+}
+function gptSelectedModel() {
+  const list = S.gptModels || [];
+  const wanted = S.state.settings.chatgptModel;
+  return wanted && list.some((m) => m.id === wanted) ? wanted : gptDefaultModel(list);
+}
+
+function modelBar() {
+  const s = S.state.settings;
+  const gpt = prov() === 'chatgpt';
+  let select;
+  if (gpt) {
+    const list = S.gptModels || [];
+    select = list.length
+      ? `<select class="select" data-change="setting-str" data-key="chatgptModel" title="Modell">${list.map((m) => `<option value="${esc(m.id)}" ${gptSelectedModel() === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>`
+      : `<button class="btn sm ghost" data-action="chatgpt-models">${icon('refresh', 'sm')} Modelle laden</button>`;
+  } else {
+    select = `<select class="select" data-change="setting-str" data-key="claudeModel" title="Modell">${CLAUDE_MODELS.map(([v, l]) => `<option value="${v}" ${s.claudeModel === v ? 'selected' : ''}>${l.split(' – ')[0]}</option>`).join('')}</select>`;
+  }
+  return `<div class="cp-model">${select}<div class="segmented sm-seg" title="Antwortstil">${EFFORTS.map(([v, l]) => `<button class="${(s.aiEffort || 'balanced') === v ? 'on' : ''}" data-action="set-effort" data-v="${v}">${l}</button>`).join('')}</div></div>`;
+}
+
 const PROVIDERS = {
   claude: { name: 'Claude', icon: 'sparkles', cls: 'p-claude' },
   chatgpt: { name: 'ChatGPT', icon: 'message', cls: 'p-chatgpt' },
@@ -1178,8 +1207,8 @@ function providerReady(p = prov()) {
 
 function providerModelLabel() {
   if (prov() === 'chatgpt') {
-    const id = S.state.settings.chatgptModel;
-    const m = (S.gptModels || []).find((x) => x.id === id) || (S.gptModels || [])[0];
+    const id = gptSelectedModel();
+    const m = (S.gptModels || []).find((x) => x.id === id);
     return m ? m.name : 'ChatGPT-Plan';
   }
   return (S.state.settings.claudeModel || 'claude-opus-5').replace('claude-', '').replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).replace(/ (\d) (\d)$/, ' $1.$2');
@@ -1214,6 +1243,7 @@ function renderClaude() {
       <button class="icon-btn sm" data-action="chat-new" title="Neuer Chat">${icon('plus')}</button>
       <button class="icon-btn sm" data-action="toggle-claude" title="Schließen">${icon('x')}</button>
     </div>
+    ${providerReady() ? modelBar() : ''}
     <div class="cp-body" id="cp-body"></div>
     <div class="cp-compose" id="cp-compose"></div>`;
   renderChatBody();
@@ -1287,7 +1317,10 @@ function messageInner(m) {
     if (m.errorKind === 'chatgpt-limit') extra = ` <a href="#" data-action="external" data-url="${MANAGE_USAGE_URL}">Nutzung verwalten</a>`;
     html += `<div class="err">${esc(m.error)}${extra}</div>`;
   }
-  if (m.streaming && !m.parts.some((p) => p.type === 'text' && p.text)) html += `<div class="typing"><i></i><i></i><i></i></div>`;
+  if (m.streaming && !m.parts.some((p) => p.type === 'text' && p.text)) {
+    const sec = m.startedAt ? Math.floor((Date.now() - m.startedAt) / 1000) : 0;
+    html += `<div class="waiting"><span class="typing"><i></i><i></i><i></i></span><span>${sec < 3 ? 'Sendet…' : `Denkt nach… ${sec} s`}</span></div>`;
+  }
   if (!m.streaming && m.parts.some((p) => p.type === 'text' && p.text)) html += `<div class="msg-tools"><button class="icon-btn sm" data-action="copy-msg" title="Kopieren">${icon('copy', 'sm')}</button></div>`;
   return html;
 }
@@ -1371,7 +1404,7 @@ function sendChat(textArg, extra = {}) {
   const provider = prov();
   const attachments = [...chat.attachments];
   chat.messages.push({ role: 'user', text, quote: extra.selection || null, attachments: attachments.map((id) => (S.data.files[id] || {}).filename || id) });
-  chat.messages.push({ role: 'assistant', parts: [], streaming: true });
+  chat.messages.push({ role: 'assistant', parts: [], streaming: true, startedAt: Date.now() });
   chat.attachments = [];
   chat.busy = true;
   chat.draft = '';
@@ -1425,7 +1458,10 @@ function onAiEvent(ev) {
     }
     case 'notice': m.parts.push({ type: 'notice', text: ev.message }); break;
     case 'retry': m.parts.push({ type: 'notice', text: 'Wiederhole Schritt…' }); break;
-    case 'done': finishSteps(); m.streaming = false; chat.busy = false; break;
+    case 'done':
+      finishSteps(); m.streaming = false; chat.busy = false;
+      if (!m.parts.some((p) => p.type === 'text' && p.text.trim())) m.error = 'Keine Antwort erhalten. Bitte noch einmal senden oder ein anderes Modell wählen.';
+      break;
     case 'stopped': finishSteps(); m.streaming = false; chat.busy = false; m.parts.push({ type: 'notice', text: 'Gestoppt.' }); break;
     case 'error':
       finishSteps(); m.streaming = false; chat.busy = false; m.error = ev.message; m.errorKind = ev.kind;
@@ -1593,6 +1629,11 @@ const actions = {
   'chatgpt-logout': async () => { await api.chatgptLogout(); S.gptModels = null; await refreshChatgpt(); toast('Von ChatGPT abgemeldet'); },
   'chatgpt-models': async () => { await refreshChatgpt(true); },
   'welcome-ok': () => { api.chatgptWelcomed(); closeModal(); },
+  'set-effort': async (el) => {
+    S.state.settings = await api.setSettings({ aiEffort: el.dataset.v });
+    renderClaude();
+    if (S.route.name === 'settings') renderMain();
+  },
   'chatgpt-log': () => api.chatgptOpenLog(),
   prefill: (el) => { openClaude(); const t = $('#chat-input'); if (t) { t.value = el.dataset.q; S.chat.draft = el.dataset.q; t.focus(); autoGrow(t); } },
   'open-doc': (el) => openDoc(el.dataset.file, Number(el.dataset.page) || 1, el.dataset.q || ''),
@@ -1804,6 +1845,12 @@ document.addEventListener('mouseup', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.altKey && e.key === 'ArrowLeft' && S.state && S.state.loggedIn) { e.preventDefault(); goBack(); }
 });
+
+// Wartezeit im Chat hochzählen
+setInterval(() => {
+  const m = S.chats && S.chat && S.chat.messages[S.chat.messages.length - 1];
+  if (m && m.streaming && !m.parts.some((p) => p.type === 'text' && p.text)) updateLastMessage();
+}, 1000);
 
 // Relative Zeitangaben aktuell halten
 setInterval(() => S.state && S.state.loggedIn && renderSyncPill(), 30000);

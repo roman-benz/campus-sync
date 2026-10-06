@@ -714,3 +714,7 @@ mark { background: rgba(255, 196, 0, .45); color: inherit; border-radius: 3px; p
 }
 .back-btn span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .back-btn:hover { background: var(--surface-hover); color: var(--text); border-color: var(--border-strong); }
+
+.cp-model { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+.cp-model .select { height: 30px; font-size: 12.5px; flex: 1; min-width: 0; padding: 0 8px; }
+.waiting { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12.5px; }
