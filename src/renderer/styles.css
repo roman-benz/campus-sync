@@ -1,9 +1,10 @@
 /* Chadoodle – Moodle-4-Grunddesign, moderner interpretiert */
 :root {
-  --primary: #0f6cbf;
-  --primary-hover: #0c5aa0;
-  --primary-soft: #e8f1fb;
-  --primary-text: #0b5aa0;
+  --primary: #d4570a;
+  --primary-hover: #b84a08;
+  --primary-soft: #fdefe4;
+  --primary-text: #b04607;
+  --on-primary: #ffffff;
   --bg: #f4f6f9;
   --surface: #ffffff;
   --surface-2: #f8f9fb;
@@ -21,12 +22,12 @@
   --danger-soft: #fbe9e7;
   --claude: #d97757;
   --claude-soft: #fbefe9;
-  --act-content: #399be2;
+  --act-content: #6b625a;
   --act-assessment: #eb66a2;
   --act-collab: #f7634d;
   --act-comm: #11a676;
   --act-interactive: #a378ff;
-  --act-admin: #5d63f6;
+  --act-admin: #8b7e74;
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, .06);
   --shadow: 0 1px 3px rgba(16, 24, 40, .06), 0 4px 14px rgba(16, 24, 40, .05);
   --shadow-lg: 0 12px 40px rgba(16, 24, 40, .16);
@@ -42,10 +43,13 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --primary: #4b9be8;
-    --primary-hover: #6aaef0;
-    --primary-soft: #16283d;
-    --primary-text: #8cc0f5;
+    --primary: #f0894a;
+    --primary-hover: #f4a06c;
+    --primary-soft: #33210f;
+    --primary-text: #f6ad7b;
+    --on-primary: #1c1007;
+    --act-content: #9a918a;
+    --act-admin: #a69a90;
     --bg: #111317;
     --surface: #1a1d22;
     --surface-2: #16191d;
@@ -69,10 +73,13 @@
   }
 }
 :root[data-theme="dark"] {
-  --primary: #4b9be8;
-  --primary-hover: #6aaef0;
-  --primary-soft: #16283d;
-  --primary-text: #8cc0f5;
+  --primary: #f0894a;
+  --primary-hover: #f4a06c;
+  --primary-soft: #33210f;
+  --primary-text: #f6ad7b;
+  --on-primary: #1c1007;
+  --act-content: #9a918a;
+  --act-admin: #a69a90;
   --bg: #111317;
   --surface: #1a1d22;
   --surface-2: #16191d;
@@ -133,7 +140,7 @@ h1, h2, h3, h4 { font-family: var(--font-display); margin: 0; line-height: 1.25;
 }
 .btn:hover { background: var(--surface-hover); }
 .btn:active { transform: scale(.98); }
-.btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
 .btn.primary:hover { background: var(--primary-hover); }
 .btn.claude { background: var(--claude); border-color: var(--claude); color: #fff; }
 .btn.claude:hover { filter: brightness(1.06); }
@@ -318,12 +325,12 @@ h1, h2, h3, h4 { font-family: var(--font-display); margin: 0; line-height: 1.25;
 /* Begrüßung */
 .hero {
   position: relative; overflow: hidden; border-radius: 18px; padding: 26px 28px; margin-bottom: 22px; color: #fff;
-  background: linear-gradient(120deg, #0f6cbf 0%, #1f86d6 55%, #3aa0e8 100%);
+  background: linear-gradient(120deg, #c2410c 0%, #e2620f 55%, #f39a2b 100%);
   box-shadow: var(--shadow);
 }
-:root[data-theme="dark"] .hero { background: linear-gradient(120deg, #0b4a85 0%, #125f9f 60%, #1a74b8 100%); }
+:root[data-theme="dark"] .hero { background: linear-gradient(120deg, #5c240b 0%, #7d3411 60%, #9c4815 100%); }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .hero { background: linear-gradient(120deg, #0b4a85 0%, #125f9f 60%, #1a74b8 100%); }
+  :root:not([data-theme="light"]) .hero { background: linear-gradient(120deg, #5c240b 0%, #7d3411 60%, #9c4815 100%); }
 }
 .hero::after {
   content: ""; position: absolute; right: -60px; top: -80px; width: 340px; height: 340px; border-radius: 50%;
@@ -520,7 +527,7 @@ h1, h2, h3, h4 { font-family: var(--font-display); margin: 0; line-height: 1.25;
 .msg { display: flex; flex-direction: column; gap: 6px; animation: fadein .2s ease-out; }
 @keyframes fadein { from { opacity: 0; transform: translateY(4px); } }
 .msg.user { align-items: flex-end; }
-.msg.user .bubble { background: var(--primary); color: #fff; padding: 9px 13px; border-radius: 16px 16px 4px 16px; max-width: 88%; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.user .bubble { background: var(--primary); color: var(--on-primary); padding: 9px 13px; border-radius: 16px 16px 4px 16px; max-width: 88%; white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg.user .att { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .msg.assistant .md { overflow-wrap: anywhere; }
 .msg .err { background: var(--danger-soft); color: var(--danger); padding: 10px 12px; border-radius: 12px; font-size: 13.5px; }
@@ -648,7 +655,7 @@ h1, h2, h3, h4 { font-family: var(--font-display); margin: 0; line-height: 1.25;
   z-index: 1; --font-height: 0; font-size: calc(var(--text-scale-factor) * var(--font-height));
   --scale-x: 1; --rotate: 0deg; transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv)); }
 .textLayer .markedContent { display: contents; }
-.textLayer ::selection { background: rgba(15, 108, 191, .3); }
+.textLayer ::selection { background: rgba(212, 87, 10, .28); }
 .textLayer span.hit { background: rgba(255, 196, 0, .45); border-radius: 2px; }
 .text-pages { max-width: 860px; margin: 0 auto; padding: 20px 16px 60px; display: flex; flex-direction: column; gap: 14px; }
 .text-page { padding: 18px 22px; }
@@ -751,8 +758,8 @@ mark { background: rgba(255, 196, 0, .45); color: inherit; border-radius: 3px; p
 .tt-ev b { font-size: 12.5px; font-weight: 650; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .tt-meta, .tt-who { font-size: 11.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .tt-who { color: var(--muted); }
-.tt-ev.c0 { --c: var(--act-content); } .tt-ev.c1 { --c: var(--act-assessment); } .tt-ev.c2 { --c: var(--act-collab); } .tt-ev.c3 { --c: var(--act-comm); }
-.tt-ev.c4 { --c: var(--act-interactive); } .tt-ev.c5 { --c: var(--act-admin); } .tt-ev.c6 { --c: var(--primary); } .tt-ev.c7 { --c: var(--claude); }
+.tt-ev.c0 { --c: #0e9384; } .tt-ev.c1 { --c: var(--act-assessment); } .tt-ev.c2 { --c: var(--act-collab); } .tt-ev.c3 { --c: var(--act-comm); }
+.tt-ev.c4 { --c: var(--act-interactive); } .tt-ev.c5 { --c: #b7861a; } .tt-ev.c6 { --c: #8c5a3c; } .tt-ev.c7 { --c: #6f8a2e; }
 .tt-now { position: absolute; left: 0; right: 0; height: 2px; background: var(--danger); z-index: 3; pointer-events: none; }
 .tt-now::before { content: ""; position: absolute; left: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
 .tt-form { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(240px, 3fr) auto auto; gap: 8px; margin-top: 14px; }

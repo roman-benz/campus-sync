@@ -101,8 +101,10 @@ const actIcon = (m, size = '') => { const i = modInfo(m); return `<div class="ac
 
 function courseBg(k) {
   if (k && k.image) return `background-image:url("${k.image.replace(/"/g, '%22')}")`;
-  const h = ((k ? k.id : 1) * 47) % 360;
-  return `background-image:linear-gradient(135deg, hsl(${h} 62% 52%), hsl(${(h + 40) % 360} 60% 40%))`;
+  // Platzhalter ohne Kursbild: nur warme und grüne Farbtöne, keine Blautöne
+  const HUES = [14, 28, 40, 352, 330, 150, 168, 85];
+  const h = HUES[(k ? k.id : 1) % HUES.length];
+  return `background-image:linear-gradient(135deg, hsl(${h} 62% 50%), hsl(${(h + 18) % 360} 58% 38%))`;
 }
 
 const courses = () => (S.data ? S.data.courses : []);
