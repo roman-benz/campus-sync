@@ -1,0 +1,49 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+const on = (channel) => (cb) => {
+  const fn = (_e, data) => cb(data);
+  ipcRenderer.on(channel, fn);
+  return () => ipcRenderer.removeListener(channel, fn);
+};
+
+contextBridge.exposeInMainWorld('api', {
+  state: () => ipcRenderer.invoke('app:state'),
+  data: () => ipcRenderer.invoke('data:get'),
+  checkSite: (url) => ipcRenderer.invoke('auth:check-site', url),
+  login: (opts) => ipcRenderer.invoke('auth:login', opts),
+  logout: (opts) => ipcRenderer.invoke('auth:logout', opts),
+  sync: () => ipcRenderer.invoke('sync:run'),
+  setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
+  setClaudeKey: (key) => ipcRenderer.invoke('settings:set-claude-key', key),
+  pickFolder: () => ipcRenderer.invoke('settings:pick-folder'),
+  openFile: (id) => ipcRenderer.invoke('file:open', id),
+  showFile: (id) => ipcRenderer.invoke('file:show', id),
+  fileUrl: (id) => ipcRenderer.invoke('file:url', id),
+  openFolder: (courseId) => ipcRenderer.invoke('folder:open', courseId),
+  openExternal: (url) => ipcRenderer.invoke('open:external', url),
+  clearNews: () => ipcRenderer.invoke('news:clear'),
+  aiSend: (payload) => ipcRenderer.invoke('ai:send', payload),
+  aiStop: (provider, id) => ipcRenderer.invoke('ai:stop', { provider, id }),
+  aiReset: (provider, id) => ipcRenderer.invoke('ai:reset', { provider, id }),
+  chatgptStatus: () => ipcRenderer.invoke('chatgpt:status'),
+  chatgptLogin: (opts) => ipcRenderer.invoke('chatgpt:login', opts),
+  chatgptCancel: () => ipcRenderer.invoke('chatgpt:cancel'),
+  chatgptLogout: (opts) => ipcRenderer.invoke('chatgpt:logout', opts),
+  chatgptModels: (force) => ipcRenderer.invoke('chatgpt:models', force),
+  chatgptWelcomed: () => ipcRenderer.invoke('chatgpt:welcomed'),
+  chatgptOpenLog: () => ipcRenderer.invoke('chatgpt:open-log'),
+  docSearch: (q, opts) => ipcRenderer.invoke('doc:search', q, opts),
+  docStatus: () => ipcRenderer.invoke('doc:status'),
+  docPages: (id, from, to) => ipcRenderer.invoke('doc:pages', id, from, to),
+  fileData: (id) => ipcRenderer.invoke('file:data', id),
+  onIndexStatus: on('index:status'),
+  onSyncStatus: on('sync:status'),
+  onDataUpdated: on('data:updated'),
+  onFilesUpdated: on('data:files'),
+  onAuthExpired: on('auth:expired'),
+  onAi: on('ai:event'),
+  updateStatus: () => ipcRenderer.invoke('update:status'),
+  updateCheck: () => ipcRenderer.invoke('update:check'),
+  updateInstall: () => ipcRenderer.invoke('update:install'),
+  onUpdateStatus: on('update:status'),
+});
