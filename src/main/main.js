@@ -119,7 +119,7 @@ function showWindow() {
 function createTray() {
   const img = fs.existsSync(ICON) ? nativeImage.createFromPath(ICON).resize({ width: 16, height: 16 }) : nativeImage.createEmpty();
   tray = new Tray(img);
-  tray.setToolTip('Moodle Desktop');
+  tray.setToolTip(`Moodle Desktop ${app.getVersion()}`);
   const menu = () =>
     Menu.buildFromTemplate([
       { label: 'Moodle Desktop öffnen', click: showWindow },
@@ -131,7 +131,7 @@ function createTray() {
   tray.setContextMenu(menu());
   tray.on('click', showWindow);
   sync.on('status', (s) => {
-    tray.setToolTip(`Moodle Desktop – ${s.state === 'idle' ? 'synchronisiert' : s.message}`);
+    tray.setToolTip(`Moodle Desktop ${app.getVersion()} – ${s.state === 'idle' ? 'synchronisiert' : s.message}`);
     tray.setContextMenu(menu());
   });
 }
@@ -359,7 +359,12 @@ app.whenReady().then(() => {
   powerMonitor.on('resume', () => setTimeout(() => {
     sync.run();
     updater.check();
+    chatgptAuth.keepAlive();
   }, 15000));
+
+  // ChatGPT-Anmeldung regelmäßig erneuern, damit man sich nicht neu anmelden muss
+  setTimeout(() => chatgptAuth.keepAlive(), 60 * 1000);
+  setInterval(() => chatgptAuth.keepAlive(), 6 * 60 * 60 * 1000);
 
   const loggedIn = startSession();
   if (loggedIn) setTimeout(() => docIndex.indexPending(), 8000);

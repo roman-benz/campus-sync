@@ -385,7 +385,7 @@ function renderDropdown() {
   if (S.ui.dropdown === 'user') {
     const site = d.site || {};
     return `<div class="dropdown" style="width:290px">
-      <div class="dd-user"><div class="avatar">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</div><div><b>${esc(site.fullname)}</b><small class="muted" style="display:block">${esc(site.sitename)}</small></div></div>
+      <div class="dd-user"><div class="avatar">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</div><div><b>${esc(site.fullname)}</b><small class="muted" style="display:block">${esc(site.sitename)}</small><small class="muted" style="display:block">Moodle Desktop ${esc(S.state.version)}</small></div></div>
       <div class="dd-sep"></div>
       <a class="dd-item" data-action="go" data-route="settings">${icon('settings')}<div>Einstellungen</div></a>
       <a class="dd-item" data-action="open-folder">${icon('folder')}<div>Download-Ordner öffnen</div></a>
@@ -861,7 +861,7 @@ function renderSettings() {
       </div></div>
       <div class="card"><div class="card-head"><h2>${icon('message')} ChatGPT</h2></div><div class="card-body">
         ${g.signedIn ? `
-          ${row('Verbunden', `${esc(g.email || g.name || 'ChatGPT-Konto')} ${g.planUsage ? '<span class="chip ok">Plan-Nutzung aktiv</span>' : '<span class="chip warn">Plan-Nutzung nicht freigegeben</span>'}`, `<button class="btn sm" data-action="external" data-url="${MANAGE_USAGE_URL}">Nutzung verwalten</button><button class="btn sm ghost" data-action="chatgpt-logout">Abmelden</button>`)}
+          ${row('Verbunden', `${esc(g.email || g.name || 'ChatGPT-Konto')} ${g.planUsage ? '<span class="chip ok">Plan-Nutzung aktiv</span>' : '<span class="chip warn">Plan-Nutzung nicht freigegeben</span>'}<br>Du bleibst angemeldet – die App erneuert die Anmeldung automatisch.`, `<button class="btn sm" data-action="external" data-url="${MANAGE_USAGE_URL}">Nutzung verwalten</button><button class="btn sm ghost" data-action="chatgpt-logout">Abmelden</button>`)}
           ${row('Modell', 'Modelle, die dein ChatGPT-Plan für Apps freigibt', S.gptModels && S.gptModels.length ? `<select class="select" style="width:260px" data-change="setting-str" data-key="chatgptModel">${S.gptModels.map((m) => `<option value="${esc(m.id)}" ${gptSelectedModel() === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>` : `<button class="btn sm" data-action="chatgpt-models">${icon('refresh', 'sm')} Modelle laden</button>`)}
           ${row('Anderes Konto', 'Mit einem anderen ChatGPT-Konto anmelden', '<button class="btn sm ghost" data-action="chatgpt-switch">Konto wechseln</button>')}
           ${row('Protokoll', 'Technisches Protokoll der ChatGPT-Anmeldung (ohne Passwörter/Tokens)', '<button class="btn sm ghost" data-action="chatgpt-log">Protokoll öffnen</button>')}

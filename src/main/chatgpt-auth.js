@@ -283,6 +283,7 @@ class ChatGPTAuth {
         accessToken: tok.access_token,
         refreshToken: tok.refresh_token,
         expiresAt: Date.now() + (tok.expires_in || 3600) * 1000,
+        lastRefresh: Date.now(),
         scope,
         welcomed: !!(prev && prev.sub === claims.sub && prev.welcomed),
       };
@@ -337,6 +338,7 @@ class ChatGPTAuth {
             refreshToken: tok.refresh_token || a.refreshToken,
             idToken: tok.id_token || a.idToken,
             expiresAt: Date.now() + (tok.expires_in || 3600) * 1000,
+        lastRefresh: Date.now(),
             scope: tok.scope || a.scope,
           };
           this.save(next);
@@ -354,6 +356,21 @@ class ChatGPTAuth {
       })();
     }
     return this.refreshing;
+  }
+
+  // Angemeldet bleiben: OpenAIs Refresh-Token verfällt nach 30 Tagen ohne Nutzung.
+  // Die App erneuert es deshalb im Hintergrund spätestens alle 5 Tage (jede Erneuerung gilt wieder 30 Tage).
+  async keepAlive() {
+    const a = this.account();
+    if (!a || !a.refreshToken) return;
+    if (Date.now() - (a.lastRefresh || 0) < 5 * 86400000) return;
+    this.save({ ...a, expiresAt: 0 });
+    try {
+      await this.accessToken();
+      log('Anmeldung im Hintergrund erneuert');
+    } catch (e) {
+      log(`Hintergrund-Erneuerung fehlgeschlagen: ${e.code || ''} ${e.message}`);
+    }
   }
 
   // Abmelden: Refresh-Token widerrufen, Registrierung (client_id) für die nächste Anmeldung behalten
