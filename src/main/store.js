@@ -30,6 +30,10 @@ const DEFAULTS = {
   // Abholzeit der Mensa (Mensa Fallenbrunnen: 11:45–13:30)
   mensaPickupFrom: '11:45',
   mensaPickupTo: '13:30',
+  // Bestelldaten für my-mensa (bleiben nur lokal)
+  mensaFirstName: '',
+  mensaLastName: '',
+  mensaEmail: '',
 };
 
 function file(name) {

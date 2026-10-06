@@ -32,7 +32,9 @@ const S = {
   index: null,
   search: null,
   // Stundenplan: Liste der Pläne, angezeigte Woche (Montag 0 Uhr) und deren Termine
-  mensa: { data: null, day: null, busy: false, error: '', url: null, defaultUrl: null, form: '', tt: null },
+  // Mensa: Speiseplan, gewählter Tag, Stundenplan des Tags; Bestellen: Warenkorb je Tag (a_id → Anzahl),
+  // Abholzeiten/Restmengen des Tags (opt), gewählte Abholzeit je Tag, Kontaktdaten, eigene Bestellungen
+  mensa: { data: null, day: null, busy: false, error: '', url: null, defaultUrl: null, form: '', tt: null, cart: {}, opt: null, time: {}, contact: null, agree: false, sending: false, orders: null },
   tt: { list: null, active: null, template: null, week: ttMonday(new Date()), events: [], loadedKey: null, busy: false, form: { name: '', url: '' } },
 };
 // Aktiver Chat = Chat des gewählten KI-Anbieters
@@ -1013,6 +1015,168 @@ function mensaDayHtml() {
     </div></div>`;
 }
 
+// ---------- Mensa: Bestellen ----------
+const mensaErr = (e) => String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+
+function mensaContact() {
+  const m = S.mensa;
+  if (!m.contact) {
+    const st = S.state.settings;
+    m.contact = { mensaFirstName: st.mensaFirstName || '', mensaLastName: st.mensaLastName || '', mensaEmail: st.mensaEmail || '' };
+  }
+  return m.contact;
+}
+
+// Abholzeiten und Restmengen für den gewählten Tag
+async function loadMensaOpt(force = false) {
+  const m = S.mensa;
+  const date = m.day;
+  if (!date || (!force && m.opt && m.opt.date === date)) return;
+  m.opt = { date, loading: true };
+  if (m.orders == null) api.mensaOrders().then((l) => { m.orders = l; if (S.route.name === 'mensa') renderMain(); }).catch(() => {});
+  try {
+    const o = await api.mensaOrderOptions(date, mensaContact().mensaEmail);
+    if (m.day === date) m.opt = { ...o, loading: false };
+  } catch (e) {
+    if (m.day === date) m.opt = { date, loading: false, error: mensaErr(e) };
+  }
+  if (m.opt.date === date) {
+    // Gewählte Abholzeit verwerfen, wenn sie nicht mehr frei ist
+    const slots = m.opt.slots || [];
+    if (m.time[date] && !slots.some((s) => s.time === m.time[date] && s.free > 0)) delete m.time[date];
+  }
+  if (S.route.name === 'mensa') renderMain();
+}
+
+const mensaCanOrder = () => {
+  const o = S.mensa.opt;
+  return !!(o && !o.loading && !o.error && o.orderable && o.date === S.mensa.day);
+};
+const mensaCart = () => S.mensa.cart[S.mensa.day] || {};
+const mensaCount = () => Object.values(mensaCart()).reduce((s, n) => s + n, 0);
+const mensaReadyText = () => `${mensaCount()} ${mensaCount() === 1 ? 'Gericht' : 'Gerichte'} · Abholung ${S.mensa.time[S.mensa.day]} Uhr`;
+
+// Was fehlt noch zum Bestellen? ('' = alles da)
+function mensaMissing() {
+  const m = S.mensa;
+  const c = mensaContact();
+  if (!mensaCount()) return 'Warenkorb ist leer';
+  if (!m.time[m.day]) return 'Abholzeit wählen';
+  if (!c.mensaFirstName.trim() || !c.mensaLastName.trim()) return 'Vor- und Nachname fehlen';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.mensaEmail.trim())) return 'E-Mail-Adresse fehlt';
+  if (!m.agree) return 'Nutzungsvereinbarung bestätigen';
+  return '';
+}
+
+// Vorbestellbar sind nur Gerichte mit Kontingent (Hinweise, Beilagen, Suppen usw. haben keins);
+// führt die Mensa kein Kontingent, alles mit Preis
+const mensaOrderable = (e) => {
+  if (!e.aid) return false;
+  const stock = (S.mensa.opt && S.mensa.opt.stock) || {};
+  return Object.keys(stock).length ? e.aid in stock : (e.prices.dhbw || e.prices.intern || 0) > 0;
+};
+
+// Mengenwähler auf der Gerichtskarte
+function dishQtyHtml(e) {
+  if (!mensaCanOrder() || !mensaOrderable(e)) return '';
+  const n = mensaCart()[e.aid] || 0;
+  const s = S.mensa.opt.stock[e.aid];
+  const soldOut = s && (s.rest <= 0 || s.live <= 0);
+  const left = s && !soldOut && s.live <= 15 ? `<span class="dish-left">noch ${s.live}</span>` : '';
+  if (soldOut && !n) return `<div class="dish-qty"><span class="dish-left out">ausverkauft</span></div>`;
+  const max = s ? Math.min(20, s.live) : 20;
+  if (!n) return `<div class="dish-qty">${left}<button class="btn sm" data-action="mensa-qty" data-aid="${esc(e.aid)}" data-d="1">${icon('plus', 'sm')} In den Warenkorb</button></div>`;
+  return `<div class="dish-qty on">${left}<div class="qty">
+      <button class="icon-btn" data-action="mensa-qty" data-aid="${esc(e.aid)}" data-d="-1" title="Eins weniger">${icon('minus', 'sm')}</button>
+      <b>${n}</b>
+      <button class="icon-btn" data-action="mensa-qty" data-aid="${esc(e.aid)}" data-d="1" title="Eins mehr" ${n >= max ? 'disabled' : ''}>${icon('plus', 'sm')}</button>
+    </div></div>`;
+}
+
+// Passt eine Abholzeit in eine Pause, die für die ZU reicht? (null = kein Stundenplan)
+function mensaSlotFits(slots) {
+  const m = S.mensa;
+  const t = m.tt;
+  if (!t || t.loading || !t.plan || t.date !== m.day) return null;
+  const st = S.state.settings;
+  const dayStart = new Date(`${t.date}T00:00:00`).getTime();
+  const minEat = Math.max(1, Number(st.mensaMinEat) || 30);
+  if (!t.events.length) return new Set(slots.map((s) => s.time));
+  const breaks = mensaBreaks(t.events, dayStart, Math.max(1, Number(st.mensaMinBreak) || 44), atClock(dayStart, st.mensaPickupFrom, '11:45'), atClock(dayStart, st.mensaPickupTo, '13:30'), minEat).filter((x) => x.ok);
+  const fits = new Set();
+  for (const s of slots) {
+    const at = atClock(dayStart, s.time, '12:00');
+    if (breaks.some((b) => at >= b.from && (b.end == null || at + minEat * 60000 <= b.end))) fits.add(s.time);
+  }
+  return fits;
+}
+
+// Bereits über Chadoodle aufgegebene Bestellungen für den Tag
+function mensaOrderedHtml() {
+  const list = (S.mensa.orders || []).filter((o) => o.date === S.mensa.day);
+  return list.map((o) => `<div class="mensa-ordered">${icon('checkcircle')}<div>
+      <b>Bestellt · Nr. ${esc(o.no)}</b>
+      <span>${o.items.map((x) => `${x.n}× ${esc(x.title)}`).join(', ')} · Abholung ${esc(o.time)}${o.until ? `–${esc(o.until)}` : ''} Uhr · Abholschein an ${esc(o.email)}</span>
+    </div></div>`).join('');
+}
+
+function mensaOrderHtml(day) {
+  const m = S.mensa;
+  const o = m.opt;
+  const head = `<div class="card-head"><h2>${icon('clipboard')} Bestellen für ${esc(day.weekday || day.label)}, ${esc(day.label.replace(/^.*?,\s*/, ''))}</h2>
+    <button class="btn ghost sm" data-action="mensa-order" title="Offizielle Bestellseite von my-mensa öffnen">${icon('external', 'sm')} my-mensa-Seite</button></div>`;
+  const card = (body) => `<div class="card mensa-order" id="mensa-order">${head}<div class="card-body">${body}</div></div>`;
+  if (!o || o.loading || o.date !== m.day) return card(`<div class="muted small">${icon('refresh', 'spin')} Prüfe Abholzeiten…</div>`);
+  if (o.error) return card(`<div class="zu-none">${icon('alert', 'sm')} ${esc(o.error)} <button class="btn sm" data-action="mensa-opt-retry">Nochmal</button></div>`);
+  if (!o.orderable) {
+    const e = new Date(`${o.earliest}T12:00:00`).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'numeric' });
+    return card(`<div class="zu-none">${icon('clock', 'sm')} Für diesen Tag ist die Vorbestellung geschlossen. Bestellbar ist wieder ab ${esc(e)}</div>`);
+  }
+
+  const day0 = day.dishes;
+  const cart = mensaCart();
+  const lines = Object.entries(cart).filter(([, n]) => n > 0).map(([aid, n]) => ({ aid, n, dish: day0.find((x) => x.aid === aid) })).filter((x) => x.dish);
+  const total = lines.reduce((s, x) => s + (x.dish.prices.dhbw || 0) * x.n, 0);
+  const basket = lines.length
+    ? `<table class="mensa-basket">${lines.map((x) => `<tr><td class="n">${x.n}×</td><td>${esc(x.dish.title)}</td><td class="p">${euro((x.dish.prices.dhbw || 0) * x.n)}</td>
+        <td class="x"><button class="icon-btn" data-action="mensa-qty" data-aid="${esc(x.aid)}" data-d="-${x.n}" title="Entfernen">${icon('x', 'sm')}</button></td></tr>`).join('')}
+        <tr class="sum"><td></td><td>Summe (DHBW-Preis)</td><td class="p">${euro(total)}</td><td></td></tr></table>`
+    : `<div class="muted small">Noch nichts ausgewählt – lege oben Gerichte in den Warenkorb.</div>`;
+
+  const slots = o.slots || [];
+  const fits = mensaSlotFits(slots);
+  const sel = m.time[m.day];
+  const slotHtml = o.message
+    ? `<div class="zu-none">${icon('alert', 'sm')} ${esc(o.message)}</div>`
+    : slots.length
+      ? `<div class="mensa-slots">${slots.map((s) => {
+          const fit = fits && fits.has(s.time);
+          const full = s.free <= 0;
+          return `<button class="mensa-slot${sel === s.time ? ' on' : ''}${fit ? ' fit' : ''}" data-action="mensa-time" data-v="${esc(s.time)}" ${full ? 'disabled' : ''} title="${esc(`${s.time}–${s.until} Uhr${full ? ' · ausgebucht' : ` · noch ${s.free} frei`}${fit ? ' · passt in deine Pause' : ''}`)}">
+            <b>${esc(s.time)}</b><span>${full ? 'voll' : `${s.free} frei`}</span></button>`;
+        }).join('')}</div>${fits && fits.size ? `<div class="muted small mensa-fit-hint"><i></i> passt in eine Pause aus „Zeit für die ZU“</div>` : ''}`
+      : `<div class="zu-none">${icon('alert', 'sm')} Für diesen Tag gibt es keine Abholzeiten.</div>`;
+
+  const c = mensaContact();
+  const field = (key, label, type, ph, ac) => `<label><span>${label}</span><input class="input" id="mensa-${key}" type="${type}" data-input="mensa-contact" data-change="setting-str" data-key="${key}" value="${esc(c[key])}" placeholder="${ph}" autocomplete="${ac}" /></label>`;
+  const missing = mensaMissing();
+
+  return card(`<div class="mensa-order-grid">
+      <section><h3>Warenkorb</h3>${basket}</section>
+      <section><h3>Abholzeit</h3>${slotHtml}</section>
+      <section><h3>Deine Daten</h3>
+        <div class="mensa-contact">${field('mensaFirstName', 'Vorname', 'text', 'Vorname', 'given-name')}${field('mensaLastName', 'Name', 'text', 'Nachname', 'family-name')}${field('mensaEmail', 'E-Mail (für den Abholschein)', 'email', 'name@beispiel.de', 'email')}</div>
+        <label class="mensa-agree" data-action="mensa-agree"><span class="cb${m.agree ? ' on' : ''}">${m.agree ? icon('check', 'sm') : ''}</span>
+          <span>Ich akzeptiere die ${o.termsUrl ? `<a href="#" data-action="external" data-url="${esc(o.termsUrl)}">Nutzungsvereinbarung</a>` : 'Nutzungsvereinbarung'} der Mensa.</span></label>
+        <p class="muted small" style="margin:6px 0 0">Name und E-Mail bleiben lokal gespeichert und gehen nur bei einer Bestellung an my-mensa.</p>
+      </section>
+    </div>
+    <div class="mensa-order-foot">
+      <span class="muted small" id="mensa-foot-hint">${esc(missing || mensaReadyText())}</span>
+      <button class="btn primary" data-action="mensa-checkout" ${!missing && !m.sending ? '' : 'disabled'}>${m.sending ? icon('refresh', 'spin') : icon('clipboard', 'sm')} ${m.sending ? 'Wird bestellt…' : 'Bestellen…'}</button>
+    </div>`);
+}
+
 function dishTags(e) {
   const diet = e.tags.filter((t) => t.diet).map((t) => `<span class="diet diet-${esc(t.code.toLowerCase())}">${esc(t.text)}</span>`).join('');
   const allergens = e.tags.filter((t) => !t.diet).map((t) => t.text);
@@ -1033,7 +1197,7 @@ function renderMensa() {
   const head = `<div class="page-head"><div><h1>${esc(d ? d.name : 'Mensa')}</h1><p>${d ? `Speiseplan · Stand ${relTime(d.fetchedAt)}` : 'Speiseplan'}${m.error ? ` · <span style="color:var(--warning)">${esc(m.error)}</span>` : ''}</p></div>
     <div class="tt-nav">
       ${d && d.days.length ? `<div class="segmented">${d.days.map(dayBtn).join('')}</div>` : ''}
-      <button class="btn primary sm" data-action="mensa-order" title="Offizielle Bestellseite von my-mensa öffnen">${icon('clipboard', 'sm')} Bestellen</button>
+      <button class="btn primary sm" data-action="mensa-goto-order" title="Zum Bestellbereich">${icon('clipboard', 'sm')} Bestellen${mensaCount() ? ` · ${mensaCount()}` : ''}</button>
       <button class="icon-btn" data-action="mensa-refresh" title="Jetzt aktualisieren">${icon('refresh', m.busy ? 'spin' : '')}</button>
     </div></div>`;
 
@@ -1043,11 +1207,13 @@ function renderMensa() {
   else if (!day) body = `<div class="card"><div class="empty">${icon('calendar')}<div>Für die nächsten Tage ist noch kein Speiseplan veröffentlicht.</div></div></div>`;
   else {
     if (!m.tt || m.tt.date !== m.day) loadMensaDay();
+    if (!m.opt || m.opt.date !== m.day) loadMensaOpt();
     body = `<div class="mensa-day-title"><b>${esc(day.weekday || day.label)}</b><span>${esc(day.label.replace(/^.*?,\s*/, ''))}</span></div>
+      ${mensaOrderedHtml()}
       ${mensaDayHtml()}
       <div class="mensa-grid">${day.dishes.map((e, i) => {
         const { diet, allergens } = dishTags(e);
-        return `<article class="dish" data-action="mensa-dish" data-i="${i}">
+        return `<article class="dish${e.aid && mensaCart()[e.aid] ? ' in-cart' : ''}" data-action="mensa-dish" data-i="${i}">
           <div class="dish-img${e.thumb ? '' : ' noimg'}">${e.thumb ? `<img src="${esc(e.image || e.thumb)}" alt="" loading="lazy" />` : icon('clipboard')}${diet ? `<div class="dish-diet">${diet}</div>` : ''}</div>
           <div class="dish-body">
             <div class="dish-cat">${esc(e.category)}</div>
@@ -1055,9 +1221,11 @@ function renderMensa() {
             ${e.description ? `<p>${esc(e.description)}</p>` : ''}
             ${allergens.length ? `<div class="dish-allergens" title="Allergene und Kennzeichnungen">${esc(allergens.join(' · '))}</div>` : ''}
             <div class="dish-price">${e.prices.dhbw != null ? `<b>${euro(e.prices.dhbw)}</b><span>DHBW</span>` : ''}<small>${[e.prices.intern != null ? `intern ${euro(e.prices.intern)}` : '', e.prices.extern != null ? `extern ${euro(e.prices.extern)}` : ''].filter(Boolean).join(' · ')}</small></div>
+            ${dishQtyHtml(e)}
           </div>
         </article>`;
-      }).join('')}</div>`;
+      }).join('')}</div>
+      ${mensaOrderHtml(day)}`;
   }
 
   const custom = m.url && m.url !== m.defaultUrl;
@@ -1069,7 +1237,7 @@ function renderMensa() {
         ${custom ? '<button type="button" class="btn" data-action="mensa-default">Fallenbrunnen</button>' : ''}
         <button class="btn primary" ${m.busy ? 'disabled' : ''}>Übernehmen</button>
       </form>
-      <p class="muted small" style="margin:10px 0 0">Funktioniert mit jeder Mensa auf my-mensa.de. Der Speiseplan wird lokal gespeichert und regelmäßig aktualisiert; Fotos werden direkt von my-mensa geladen. Bestellt wird über die offizielle my-mensa-Seite; der Abholschein kommt per E-Mail.</p>
+      <p class="muted small" style="margin:10px 0 0">Funktioniert mit jeder Mensa auf my-mensa.de. Der Speiseplan wird lokal gespeichert und regelmäßig aktualisiert; Fotos werden direkt von my-mensa geladen. Bestellt wird direkt hier über my-mensa; der Abholschein kommt per E-Mail.</p>
     </div></div>`;
 
   return `<div class="page wide">${head}${body}${settings}</div>`;
@@ -2024,8 +2192,67 @@ function attachFile(id) {
 
 const actions = {
   'mensa-day': (el) => { S.mensa.day = el.dataset.v; renderMain(); },
-  'mensa-refresh': () => loadMensa(true),
+  'mensa-refresh': () => { loadMensa(true); loadMensaOpt(true); },
   'mensa-order': () => { closeModal(); api.mensaOrder(); },
+  'mensa-goto-order': () => { const el = $('#mensa-order'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
+  'mensa-opt-retry': () => loadMensaOpt(true),
+  'mensa-qty': (el) => {
+    const m = S.mensa;
+    if (!mensaCanOrder()) return;
+    const aid = el.dataset.aid;
+    const s = m.opt.stock[aid];
+    const max = s ? Math.max(0, Math.min(20, s.live)) : 20;
+    const cart = (m.cart[m.day] = { ...mensaCart() });
+    const n = Math.max(0, Math.min(max, (cart[aid] || 0) + Number(el.dataset.d)));
+    if (n) cart[aid] = n;
+    else delete cart[aid];
+    // Im offenen Gerichts-Dialog den Mengenwähler mitziehen
+    if ($('#modal .dish-modal')) actions['mensa-dish']({ dataset: { i: $('#modal .dish-modal').dataset.i } });
+    renderMain();
+  },
+  'mensa-time': (el) => { S.mensa.time[S.mensa.day] = el.dataset.v; renderMain(); },
+  'mensa-agree': () => { S.mensa.agree = !S.mensa.agree; renderMain(); },
+  'mensa-checkout': () => {
+    const m = S.mensa;
+    const day = m.data && m.data.days.find((x) => x.date === m.day);
+    if (!day || !mensaCanOrder()) return;
+    const c = mensaContact();
+    const lines = Object.entries(mensaCart()).map(([aid, n]) => ({ n, dish: day.dishes.find((x) => x.aid === aid) })).filter((x) => x.dish && x.n > 0);
+    const slot = (m.opt.slots || []).find((s) => s.time === m.time[m.day]);
+    if (!lines.length || !slot) return;
+    const total = lines.reduce((s, x) => s + (x.dish.prices.dhbw || 0) * x.n, 0);
+    showModal(`<h3>Bestellung abschicken?</h3>
+      <p class="muted" style="margin:4px 0 14px">${esc(day.weekday)}, ${esc(day.label.replace(/^.*?,\s*/, ''))} · Abholung ${esc(slot.time)}–${esc(slot.until)} Uhr</p>
+      <table class="mensa-basket">${lines.map((x) => `<tr><td class="n">${x.n}×</td><td>${esc(x.dish.title)}</td><td class="p">${euro((x.dish.prices.dhbw || 0) * x.n)}</td></tr>`).join('')}
+        <tr class="sum"><td></td><td>Summe (DHBW-Preis)</td><td class="p">${euro(total)}</td></tr></table>
+      <dl class="kv small" style="margin-top:14px"><dt>Name</dt><dd>${esc(`${c.mensaFirstName} ${c.mensaLastName}`.trim())}</dd><dt>Abholschein an</dt><dd>${esc(c.mensaEmail)}</dd></dl>
+      <p class="muted small">Die Bestellung ist verbindlich und geht direkt an die Mensa.</p>
+      <div class="row"><button class="btn" data-action="modal-close">Abbrechen</button><button class="btn primary" data-action="mensa-confirm">${icon('check', 'sm')} Verbindlich bestellen</button></div>`);
+  },
+  'mensa-confirm': async () => {
+    const m = S.mensa;
+    if (m.sending) return;
+    const date = m.day;
+    const c = mensaContact();
+    closeModal();
+    m.sending = true;
+    renderMain();
+    try {
+      const r = await api.mensaPlaceOrder({ date, items: mensaCart(), time: m.time[date], firstName: c.mensaFirstName, lastName: c.mensaLastName, email: c.mensaEmail });
+      delete m.cart[date];
+      delete m.time[date];
+      m.orders = [r, ...(m.orders || [])];
+      showModal(`<div class="mensa-done">${icon('checkcircle', 'lg')}<h3>Bestellt!</h3>
+        <p>Bestellnummer <b>${esc(r.no)}</b> · Abholung ${esc(r.time)}${r.until ? `–${esc(r.until)}` : ''} Uhr</p>
+        <p class="muted small">Der Abholschein kommt per E-Mail an ${esc(r.email)}.</p></div>
+        <div class="row"><button class="btn primary" data-action="modal-close">Fertig</button></div>`);
+    } catch (e) {
+      toast(mensaErr(e), true);
+    } finally {
+      m.sending = false;
+      loadMensaOpt(true);
+    }
+  },
   'mensa-default': async () => {
     S.mensa.busy = true;
     renderMain();
@@ -2046,7 +2273,7 @@ const actions = {
     const e = day && day.dishes[Number(el.dataset.i)];
     if (!e) return;
     const { diet, allergens } = dishTags(e);
-    showModal(`${e.image ? `<img class="dish-big" src="${esc(e.image)}" alt="" />` : ''}
+    showModal(`<div class="dish-modal" data-i="${esc(el.dataset.i)}" hidden></div>${e.image ? `<img class="dish-big" src="${esc(e.image)}" alt="" />` : ''}
       <div class="dish-cat">${esc(e.category)}</div><h3>${esc(e.title)}</h3>
       ${e.description ? `<p>${esc(e.description)}</p>` : ''}
       ${diet ? `<div class="dish-tags-row">${diet}</div>` : ''}
@@ -2056,7 +2283,7 @@ const actions = {
         ${e.prices.extern != null ? `<dt>Extern</dt><dd>${euro(e.prices.extern)}</dd>` : ''}
         ${allergens.length ? `<dt>Enthält</dt><dd>${esc(allergens.join(', '))}</dd>` : ''}
       </dl>
-      <div class="row"><button class="btn" data-action="modal-close">Schließen</button><button class="btn primary" data-action="mensa-order">${icon('clipboard', 'sm')} Bestellen</button></div>`);
+      <div class="row">${dishQtyHtml(e)}<button class="btn" data-action="modal-close">Schließen</button></div>`);
   },
   'tt-week': (el) => { S.tt.week = ttAddDays(S.tt.week, 7 * Number(el.dataset.d)); loadTimetable(); },
   'tt-today': () => { S.tt.week = ttMonday(new Date()); loadTimetable(); },
@@ -2352,6 +2579,17 @@ document.addEventListener('input', (e) => {
   else if (k === 'file-search') { S.ui.fileSearch = e.target.value; renderMain(); }
   else if (k === 'tt-form') S.tt.form[e.target.dataset.key] = e.target.value;
   else if (k === 'mensa-form') S.mensa.form = e.target.value;
+  else if (k === 'mensa-contact') {
+    // Live mitschreiben, damit ein Neuaufbau (z. B. Klick auf +) nichts Getipptes verliert
+    mensaContact()[e.target.dataset.key] = e.target.value;
+    const btn = $('[data-action="mensa-checkout"]');
+    const hint = $('#mensa-foot-hint');
+    if (btn && hint) {
+      const miss = mensaMissing();
+      btn.disabled = !!miss || S.mensa.sending;
+      hint.textContent = miss || mensaReadyText();
+    }
+  }
   else if (k === 'chat-input') { S.chat.draft = e.target.value; autoGrow(e.target); }
 });
 

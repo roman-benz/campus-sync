@@ -422,6 +422,9 @@ function registerIpc() {
   ipcMain.handle('mensa:set-url', (_e, url) => mensa.setUrl(url || MENSA_DEFAULT));
   ipcMain.handle('mensa:url', () => ({ url: mensa.url(), defaultUrl: MENSA_DEFAULT }));
   ipcMain.handle('mensa:order', () => openMensaOrder());
+  ipcMain.handle('mensa:order-options', (_e, date, email) => mensa.orderOptions(String(date || ''), String(email || '')));
+  ipcMain.handle('mensa:place-order', (_e, o) => mensa.order(o || {}));
+  ipcMain.handle('mensa:orders', () => mensa.orders());
 
   // Dokumente: Volltextsuche, Seiten, Rohdaten für den PDF-Viewer
   ipcMain.handle('doc:search', (_e, q, opts) => docIndex.search(q, opts || {}));

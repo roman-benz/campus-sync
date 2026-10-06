@@ -844,3 +844,59 @@ mark { background: rgba(255, 196, 0, .45); color: inherit; border-radius: 3px; p
 .zu-none, .zu-free { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text-2); }
 .zu-none .ic { color: var(--warning); }
 .zu-free .ic { color: var(--success); }
+
+/* ---------- Mensa: Bestellen ---------- */
+.dish.in-cart { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+.dish-qty { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 10px; min-height: 32px; }
+.dish-qty .btn.sm { gap: 5px; }
+.dish-left { margin-right: auto; font-size: 12px; font-weight: 600; color: var(--warning); }
+.dish-left.out { color: var(--muted); margin: 0 0 0 auto; }
+.qty { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--primary); border-radius: 10px; background: var(--primary-soft); }
+.qty .icon-btn { width: 30px; height: 30px; border-radius: 8px; color: var(--primary-text); }
+.qty .icon-btn:disabled { opacity: .4; cursor: default; }
+.qty b { min-width: 22px; text-align: center; font-variant-numeric: tabular-nums; color: var(--primary-text); }
+.modal .row .dish-qty { margin: 0 auto 0 0; }
+.modal .row .dish-qty .dish-left { margin-right: 6px; }
+
+.mensa-order { margin-top: 22px; scroll-margin-top: 16px; }
+.mensa-order-grid { display: grid; grid-template-columns: minmax(240px, 1.1fr) minmax(220px, 1fr) minmax(240px, 1fr); gap: 24px; }
+@media (max-width: 1100px) { .mensa-order-grid { grid-template-columns: 1fr 1fr; } .mensa-order-grid > section:last-child { grid-column: 1 / -1; } }
+@media (max-width: 720px) { .mensa-order-grid { grid-template-columns: 1fr; } }
+.mensa-order-grid h3 { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+.mensa-basket { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.mensa-basket td { padding: 6px 4px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.mensa-basket td.n { width: 1%; white-space: nowrap; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mensa-basket td.p { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mensa-basket td.x { width: 1%; }
+.mensa-basket td.x .icon-btn { width: 26px; height: 26px; }
+.mensa-basket tr.sum td { border-bottom: 0; font-weight: 700; padding-top: 9px; }
+.mensa-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 7px; }
+.mensa-slot {
+  display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 7px 4px; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: var(--surface); transition: border-color .15s, background .15s;
+}
+.mensa-slot b { font-size: 14px; font-variant-numeric: tabular-nums; }
+.mensa-slot span { font-size: 11px; color: var(--muted); }
+.mensa-slot:hover:not(:disabled) { border-color: var(--primary); }
+.mensa-slot.fit { background: var(--success-soft); border-color: color-mix(in srgb, var(--success) 45%, transparent); }
+.mensa-slot.on { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.mensa-slot.on span { color: var(--on-primary); opacity: .85; }
+.mensa-slot:disabled { opacity: .45; cursor: default; }
+.mensa-fit-hint { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.mensa-fit-hint i { width: 12px; height: 12px; border-radius: 4px; background: var(--success-soft); border: 1px solid color-mix(in srgb, var(--success) 45%, transparent); }
+.mensa-contact { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mensa-contact label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.mensa-contact label:last-child { grid-column: 1 / -1; }
+.mensa-contact .input { height: 36px; color: var(--text); font-size: 14px; }
+.mensa-agree { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; font-size: 13px; cursor: pointer; }
+.mensa-agree .cb { flex: none; width: 18px; height: 18px; margin-top: 1px; border-radius: 5px; border: 1.5px solid var(--border-strong); display: grid; place-items: center; background: var(--surface); }
+.mensa-agree .cb.on { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.mensa-agree .cb .ic { width: 13px; height: 13px; stroke-width: 3; }
+.mensa-order-foot { display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+.mensa-ordered { display: flex; align-items: center; gap: 12px; padding: 12px 16px; margin-bottom: 14px; border-radius: var(--radius); background: var(--success-soft); }
+.mensa-ordered > .ic { color: var(--success); width: 22px; height: 22px; }
+.mensa-ordered div { display: flex; flex-direction: column; }
+.mensa-ordered span { font-size: 13px; color: var(--text-2); }
+.mensa-done { text-align: center; padding: 6px 0 2px; }
+.mensa-done > .ic { width: 44px; height: 44px; color: var(--success); margin-bottom: 6px; }
+.mensa-done p { margin: 0 0 6px; }
