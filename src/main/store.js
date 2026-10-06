@@ -23,6 +23,8 @@ const DEFAULTS = {
   timetables: [{ id: 'tsa25', name: 'TSA25 · DHBW Ravensburg', url: 'https://rapla.dhbw.de/rapla/internal_calendar?user=muenzer@vw.ba.ba-ravensburg.de&file=TSA25' }],
   timetableActive: 'tsa25',
   mensaUrl: 'https://zuf.my-mensa.de/mensatogo.php?mensa=mensa_fallenbrunnen',
+  // So lang muss eine Pause mindestens sein, damit es für einen Mensabesuch reicht
+  mensaMinBreak: 44,
 };
 
 function file(name) {

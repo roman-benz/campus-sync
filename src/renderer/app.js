@@ -32,7 +32,7 @@ const S = {
   index: null,
   search: null,
   // Stundenplan: Liste der Pläne, angezeigte Woche (Montag 0 Uhr) und deren Termine
-  mensa: { data: null, day: null, busy: false, error: '', url: null, defaultUrl: null, form: '' },
+  mensa: { data: null, day: null, busy: false, error: '', url: null, defaultUrl: null, form: '', tt: null },
   tt: { list: null, active: null, template: null, week: ttMonday(new Date()), events: [], loadedKey: null, busy: false, form: { name: '', url: '' } },
 };
 // Aktiver Chat = Chat des gewählten KI-Anbieters
@@ -898,6 +898,89 @@ async function loadMensa(force = false) {
   }
 }
 
+// Vorlesungen des gewählten Mensa-Tags aus dem aktiven Stundenplan
+async function loadMensaDay() {
+  const m = S.mensa;
+  const date = m.day;
+  if (!date || (m.tt && m.tt.date === date)) return;
+  m.tt = { date, loading: true, events: [], plan: null };
+  try {
+    const r = await api.ttList();
+    const plan = r.list.find((x) => x.id === r.active) || r.list[0] || null;
+    const start = new Date(`${date}T00:00:00`).getTime();
+    const events = plan ? await api.ttEvents(plan.id, start, ttAddDays(start, 1)) : [];
+    if (m.day === date) m.tt = { date, loading: false, plan, events: events.filter((e) => !e.allDay && e.start >= start && e.start < ttAddDays(start, 1)) };
+  } catch {
+    if (m.day === date) m.tt = { date, loading: false, plan: null, events: [] };
+  }
+  if (S.route.name === 'mensa') renderMain();
+}
+
+// Pausen zwischen den Vorlesungen (Überschneidungen zusammengefasst) + Tagesränder um die Mittagszeit
+function mensaBreaks(events, dayStart) {
+  const iv = events.map((e) => [e.start, e.end]).sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const [a, b] of iv) {
+    const last = merged[merged.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else merged.push([a, b]);
+  }
+  const at = (h, min = 0) => dayStart + (h * 60 + min) * 60000;
+  const breaks = [];
+  for (let i = 1; i < merged.length; i++) {
+    if (merged[i][0] > merged[i - 1][1]) breaks.push({ start: merged[i - 1][1], end: merged[i][0], kind: 'between' });
+  }
+  if (merged.length) {
+    // Erste Vorlesung erst nachmittags: vorher ist Zeit (gerechnet ab 11:30)
+    if (merged[0][0] - at(11, 30) > 0) breaks.unshift({ start: at(11, 30), end: merged[0][0], kind: 'before' });
+    // Letzte Vorlesung endet vor 14 Uhr: danach ist Zeit (gerechnet bis 14:00)
+    const lastEnd = merged[merged.length - 1][1];
+    if (at(14) - lastEnd > 0) breaks.push({ start: lastEnd, end: at(14), kind: 'after' });
+  }
+  return { merged, breaks };
+}
+
+function mensaDayHtml() {
+  const m = S.mensa;
+  const t = m.tt;
+  const minBreak = Math.max(1, Number(S.state.settings.mensaMinBreak) || 44);
+  const minInput = `<label class="zu-min" title="Mindestlänge einer Pause für den Mensabesuch">mind. <input type="number" min="10" max="180" step="1" class="input" data-change="setting-num" data-key="mensaMinBreak" value="${minBreak}" /> Min.</label>`;
+  const head = (sub) => `<div class="card-head"><h2>${icon('clock')} Zeit für die ZU</h2>${minInput}</div><div class="card-body">${sub}`;
+  if (!t || t.loading) return `<div class="card zu-card">${head(`<div class="muted small">Lade Stundenplan…</div>`)}</div></div>`;
+  if (!t.plan) return `<div class="card zu-card">${head(`<div class="muted small">Kein Stundenplan eingetragen. Füge ihn im Reiter <a href="#" data-action="go" data-route="timetable">Stundenplan</a> hinzu, dann siehst du hier, wann du in die ZU gehen kannst.</div>`)}</div></div>`;
+
+  const dayStart = new Date(`${t.date}T00:00:00`).getTime();
+  if (!t.events.length) return `<div class="card zu-card">${head(`<div class="zu-free">${icon('checkcircle', 'sm')} Keine Vorlesungen an diesem Tag – du kannst jederzeit in die ZU.</div>`)}</div></div>`;
+
+  const { breaks } = mensaBreaks(t.events, dayStart);
+  const ok = breaks.filter((b) => b.end - b.start >= minBreak * 60000);
+  const hourOf = (ms) => (ms - dayStart) / 3600000;
+  const from = Math.min(8, Math.floor(hourOf(Math.min(...t.events.map((e) => e.start)))));
+  const to = Math.max(18, Math.ceil(hourOf(Math.max(...t.events.map((e) => e.end)))));
+  const pos = (ms) => ((hourOf(ms) - from) / (to - from)) * 100;
+  const mins = (b) => Math.round((b.end - b.start) / 60000);
+
+  const blocks = t.events.map((e) => `<div class="zu-lec" style="left:${pos(e.start)}%;width:${pos(e.end) - pos(e.start)}%" title="${esc(`${e.title}\n${ttClock(e.start)}–${ttClock(e.end)}${e.location ? '\n' + e.location : ''}`)}"><span>${esc(e.title.replace(/\s*\(.*$/, ''))}</span></div>`).join('');
+  const gaps = breaks.map((b) => {
+    const good = mins(b) >= minBreak;
+    return `<div class="zu-gap ${good ? 'ok' : 'short'}" style="left:${pos(b.start)}%;width:${pos(b.end) - pos(b.start)}%" title="${esc(`${ttClock(b.start)}–${ttClock(b.end)} · ${mins(b)} Min.${good ? ' – reicht für die ZU' : ' – zu kurz'}`)}"><span>${mins(b)}′</span></div>`;
+  }).join('');
+  const ticks = [];
+  for (let h = from; h <= to; h += 2) ticks.push(`<span style="left:${pos(dayStart + h * 3600000)}%">${h}</span>`);
+  const isToday = t.date === new Date().toLocaleDateString('sv-SE');
+  const nowMark = isToday && Date.now() > dayStart + from * 3600000 && Date.now() < dayStart + to * 3600000 ? `<div class="zu-now" style="left:${pos(Date.now())}%"></div>` : '';
+
+  const label = (b) => (b.kind === 'before' ? 'vor der ersten Vorlesung' : b.kind === 'after' ? 'nach der letzten Vorlesung' : 'Pause');
+  const list = ok.length
+    ? ok.map((b) => `<div class="zu-slot">${icon('check', 'sm')}<b>${ttClock(b.start)}–${ttClock(b.end)}</b><span>${mins(b)} Min. · ${label(b)}</span></div>`).join('')
+    : `<div class="zu-none">${icon('alert', 'sm')} Keine Pause mit mindestens ${minBreak} Minuten – an diesem Tag reicht es zwischen den Vorlesungen nicht für die ZU.</div>`;
+
+  return `<div class="card zu-card">${head(`
+      <div class="zu-strip"><div class="zu-track">${gaps}${blocks}${nowMark}</div><div class="zu-ticks">${ticks.join('')}</div></div>
+      <div class="zu-slots">${list}</div>`)}
+    </div></div>`;
+}
+
 function dishTags(e) {
   const diet = e.tags.filter((t) => t.diet).map((t) => `<span class="diet diet-${esc(t.code.toLowerCase())}">${esc(t.text)}</span>`).join('');
   const allergens = e.tags.filter((t) => !t.diet).map((t) => t.text);
@@ -927,7 +1010,9 @@ function renderMensa() {
   else if (!d) body = `<div class="card"><div class="empty">${icon('cloudoff')}<div>Speiseplan konnte nicht geladen werden.</div></div></div>`;
   else if (!day) body = `<div class="card"><div class="empty">${icon('calendar')}<div>Für die nächsten Tage ist noch kein Speiseplan veröffentlicht.</div></div></div>`;
   else {
+    if (!m.tt || m.tt.date !== m.day) loadMensaDay();
     body = `<div class="mensa-day-title"><b>${esc(day.weekday || day.label)}</b><span>${esc(day.label.replace(/^.*?,\s*/, ''))}</span></div>
+      ${mensaDayHtml()}
       <div class="mensa-grid">${day.dishes.map((e, i) => {
         const { diet, allergens } = dishTags(e);
         return `<article class="dish" data-action="mensa-dish" data-i="${i}">
@@ -2246,6 +2331,7 @@ document.addEventListener('change', async (e) => {
   const patch = { [t.dataset.key]: k === 'setting-bool' ? t.checked : k === 'setting-num' ? Number(t.value) : t.value };
   S.state.settings = await api.setSettings(patch);
   if (t.dataset.key === 'claudeModel' || t.dataset.key === 'chatgptModel') renderClaude();
+  if (t.dataset.key === 'mensaMinBreak' && S.route.name === 'mensa') renderMain();
   toast('Gespeichert');
 });
 

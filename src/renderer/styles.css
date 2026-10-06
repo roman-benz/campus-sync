@@ -813,3 +813,30 @@ mark { background: rgba(255, 196, 0, .45); color: inherit; border-radius: 3px; p
 .dish-big { width: calc(100% + 48px); margin: -24px -24px 16px; max-height: 300px; object-fit: cover; border-radius: 18px 18px 0 0; display: block; }
 .dish-tags-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .mensa-form { grid-template-columns: minmax(260px, 1fr) auto auto; }
+
+/* Mensa: Zeit für die ZU (Ausschnitt aus dem Stundenplan) */
+.zu-card { margin-bottom: 18px; }
+.zu-card .card-head { padding-bottom: 2px; }
+.zu-min { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.zu-min .input { width: 62px; height: 30px; padding: 0 8px; text-align: center; }
+.zu-strip { margin: 6px 0 4px; }
+.zu-track { position: relative; height: 42px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--border); overflow: hidden; }
+.zu-lec, .zu-gap { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; overflow: hidden; }
+.zu-lec { padding: 0 7px; background: color-mix(in srgb, var(--text) 13%, var(--surface)); border-left: 1px solid var(--surface); border-right: 1px solid var(--surface); }
+.zu-lec span { font-size: 11.5px; font-weight: 600; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zu-gap { justify-content: center; }
+.zu-gap span { font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+.zu-gap.ok { background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--success) 26%, transparent) 0 7px, color-mix(in srgb, var(--success) 16%, transparent) 7px 14px); }
+.zu-gap.ok span { color: var(--success); }
+.zu-gap.short span { color: var(--muted); }
+.zu-now { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--danger); z-index: 2; }
+.zu-ticks { position: relative; height: 16px; margin-top: 3px; }
+.zu-ticks span { position: absolute; transform: translateX(-50%); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.zu-ticks span:first-child { transform: none; }
+.zu-slots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.zu-slot { display: inline-flex; align-items: center; gap: 7px; padding: 6px 11px; border-radius: 9px; background: var(--success-soft); color: var(--success); font-size: 13px; }
+.zu-slot b { color: var(--text); font-variant-numeric: tabular-nums; }
+.zu-slot span { color: var(--text-2); }
+.zu-none, .zu-free { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text-2); }
+.zu-none .ic { color: var(--warning); }
+.zu-free .ic { color: var(--success); }
