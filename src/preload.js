@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('api', {
   mensaGet: (force) => ipcRenderer.invoke('mensa:get', force),
   mensaSetUrl: (url) => ipcRenderer.invoke('mensa:set-url', url),
   mensaUrl: () => ipcRenderer.invoke('mensa:url'),
+  mensaOrder: () => ipcRenderer.invoke('mensa:order'),
   onMensa: on('mensa:changed'),
   onIndexStatus: on('index:status'),
   onSyncStatus: on('sync:status'),

@@ -918,6 +918,7 @@ function renderMensa() {
   const head = `<div class="page-head"><div><h1>${esc(d ? d.name : 'Mensa')}</h1><p>${d ? `Speiseplan · Stand ${relTime(d.fetchedAt)}` : 'Speiseplan'}${m.error ? ` · <span style="color:var(--warning)">${esc(m.error)}</span>` : ''}</p></div>
     <div class="tt-nav">
       ${d && d.days.length ? `<div class="segmented">${d.days.map(dayBtn).join('')}</div>` : ''}
+      <button class="btn primary sm" data-action="mensa-order" title="Offizielle Bestellseite von my-mensa öffnen">${icon('clipboard', 'sm')} Bestellen</button>
       <button class="icon-btn" data-action="mensa-refresh" title="Jetzt aktualisieren">${icon('refresh', m.busy ? 'spin' : '')}</button>
     </div></div>`;
 
@@ -944,14 +945,14 @@ function renderMensa() {
 
   const custom = m.url && m.url !== m.defaultUrl;
   const settings = `<div class="card" style="margin-top:22px"><div class="card-head"><h2>${icon('settings')} Mensa</h2>
-      <button class="btn ghost sm" data-action="external" data-url="${esc(m.url || '')}">${icon('external', 'sm')} Bei my-mensa öffnen</button></div>
+      <button class="btn ghost sm" data-action="external" data-url="${esc(m.url || '')}">${icon('external', 'sm')} Im Browser öffnen</button></div>
     <div class="card-body">
       <form class="tt-form mensa-form" data-submit="mensa-url">
         <input class="input" id="mensa-url" data-input="mensa-form" placeholder="Link zur Mensa auf my-mensa.de" value="${esc(m.form || m.url || '')}" />
         ${custom ? '<button type="button" class="btn" data-action="mensa-default">Fallenbrunnen</button>' : ''}
         <button class="btn primary" ${m.busy ? 'disabled' : ''}>Übernehmen</button>
       </form>
-      <p class="muted small" style="margin:10px 0 0">Funktioniert mit jeder Mensa auf my-mensa.de. Der Speiseplan wird lokal gespeichert und regelmäßig aktualisiert; Fotos werden direkt von my-mensa geladen.</p>
+      <p class="muted small" style="margin:10px 0 0">Funktioniert mit jeder Mensa auf my-mensa.de. Der Speiseplan wird lokal gespeichert und regelmäßig aktualisiert; Fotos werden direkt von my-mensa geladen. Bestellt wird über die offizielle my-mensa-Seite; der Abholschein kommt per E-Mail.</p>
     </div></div>`;
 
   return `<div class="page wide">${head}${body}${settings}</div>`;
@@ -1907,6 +1908,7 @@ function attachFile(id) {
 const actions = {
   'mensa-day': (el) => { S.mensa.day = el.dataset.v; renderMain(); },
   'mensa-refresh': () => loadMensa(true),
+  'mensa-order': () => { closeModal(); api.mensaOrder(); },
   'mensa-default': async () => {
     S.mensa.busy = true;
     renderMain();
@@ -1937,7 +1939,7 @@ const actions = {
         ${e.prices.extern != null ? `<dt>Extern</dt><dd>${euro(e.prices.extern)}</dd>` : ''}
         ${allergens.length ? `<dt>Enthält</dt><dd>${esc(allergens.join(', '))}</dd>` : ''}
       </dl>
-      <div class="row"><button class="btn" data-action="modal-close">Schließen</button></div>`);
+      <div class="row"><button class="btn" data-action="modal-close">Schließen</button><button class="btn primary" data-action="mensa-order">${icon('clipboard', 'sm')} Bestellen</button></div>`);
   },
   'tt-week': (el) => { S.tt.week = ttAddDays(S.tt.week, 7 * Number(el.dataset.d)); loadTimetable(); },
   'tt-today': () => { S.tt.week = ttMonday(new Date()); loadTimetable(); },

@@ -158,6 +158,49 @@ function createTray() {
   });
 }
 
+// Offizielle Bestellseite von my-mensa in einem eigenen Fenster. Eigenes, dauerhaftes Profil
+// (Name/E-Mail merkt sich die Seite selbst), kein Zugriff auf die App; fremde Links → Browser.
+let orderWin = null;
+function openMensaOrder() {
+  if (orderWin && !orderWin.isDestroyed()) {
+    if (orderWin.isMinimized()) orderWin.restore();
+    return orderWin.focus();
+  }
+  const url = mensa.url();
+  const isMensa = (u) => {
+    try {
+      return /(^|\.)my-mensa\.de$/i.test(new URL(u).hostname);
+    } catch {
+      return false;
+    }
+  };
+  orderWin = new BrowserWindow({
+    width: 1120,
+    height: 880,
+    minWidth: 720,
+    minHeight: 560,
+    title: `Mensa bestellen – ${APP_NAME}`,
+    icon: fs.existsSync(ICON) ? ICON : undefined,
+    autoHideMenuBar: true,
+    backgroundColor: '#ffffff',
+    webPreferences: { partition: 'persist:mensa-order', contextIsolation: true, sandbox: true, nodeIntegration: false },
+  });
+  orderWin.removeMenu();
+  orderWin.webContents.setWindowOpenHandler(({ url: u }) => {
+    if (/^https?:\/\//i.test(u)) shell.openExternal(u);
+    return { action: 'deny' };
+  });
+  orderWin.webContents.on('will-navigate', (e, u) => {
+    if (!isMensa(u)) {
+      e.preventDefault();
+      if (/^https?:\/\//i.test(u)) shell.openExternal(u);
+    }
+  });
+  orderWin.on('page-title-updated', (e) => e.preventDefault());
+  orderWin.on('closed', () => (orderWin = null));
+  orderWin.loadURL(url);
+}
+
 async function openExternal(url) {
   if (!/^https?:\/\//i.test(url)) return;
   // Moodle-Seiten mit automatischer Anmeldung öffnen (wenn möglich)
@@ -378,6 +421,7 @@ function registerIpc() {
   ipcMain.handle('mensa:get', (_e, force) => mensa.get(!!force));
   ipcMain.handle('mensa:set-url', (_e, url) => mensa.setUrl(url || MENSA_DEFAULT));
   ipcMain.handle('mensa:url', () => ({ url: mensa.url(), defaultUrl: MENSA_DEFAULT }));
+  ipcMain.handle('mensa:order', () => openMensaOrder());
 
   // Dokumente: Volltextsuche, Seiten, Rohdaten für den PDF-Viewer
   ipcMain.handle('doc:search', (_e, q, opts) => docIndex.search(q, opts || {}));
