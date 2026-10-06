@@ -1,4 +1,4 @@
-/* Campus Sync – Oberfläche. Liest ausschließlich den lokalen Cache aus dem Hauptprozess. */
+/* Chadoodle – Oberfläche. Liest ausschließlich den lokalen Cache aus dem Hauptprozess. */
 // `api` ist das globale Objekt aus preload.js (contextBridge)
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -31,6 +31,8 @@ const S = {
   gptLogin: false,
   index: null,
   search: null,
+  // Stundenplan: Liste der Pläne, angezeigte Woche (Montag 0 Uhr) und deren Termine
+  tt: { list: null, active: null, template: null, week: ttMonday(new Date()), events: [], loadedKey: null, busy: false, form: { name: '', url: '' } },
 };
 // Aktiver Chat = Chat des gewählten KI-Anbieters
 Object.defineProperty(S, 'chat', { get: () => S.chats[prov()] });
@@ -168,6 +170,8 @@ async function boot() {
   api.onSyncStatus((st) => { S.status = st; renderSyncPill(); });
   api.onDataUpdated(async () => { S.data = await api.data(); renderNav(); renderLeft(); renderMain(); });
   api.onFilesUpdated(async () => { S.data = await api.data(); if (['course', 'module', 'dashboard'].includes(S.route.name)) renderMain(); });
+  api.onTimetables(() => { if (S.route.name === 'timetable') loadTimetable(true); });
+  setInterval(placeNowLine, 60 * 1000);
   api.onAuthExpired(() => toast('Moodle-Sitzung abgelaufen – bitte neu anmelden.', true));
   api.onAi(onAiEvent);
   api.onIndexStatus((st) => {
@@ -265,7 +269,7 @@ function renderLogin() {
       <div class="login-card">
         <div class="login-brand">
           <div class="brand-mark">${icon('graduation')}</div>
-          <div><h1>Campus Sync</h1><div class="sub">Deine Moodle-Kurse lokal – mit KI-Lernassistent</div></div>
+          <div><h1>Chadoodle</h1><div class="sub">Deine Moodle-Kurse lokal – mit KI-Lernassistent</div></div>
         </div>
         ${L.error ? `<div class="error">${esc(L.error)}</div>` : ''}
         ${body}
@@ -283,6 +287,23 @@ async function loginDone() {
 }
 
 const submits = {
+  async 'tt-add'() {
+    const f = S.tt.form;
+    if (!f.url.trim()) return toast('Bitte einen Link eingeben.', true);
+    S.tt.busy = true;
+    renderMain();
+    try {
+      await api.ttAdd({ name: f.name, url: f.url });
+      S.tt.form = { name: '', url: '' };
+      S.tt.week = ttMonday(new Date());
+      toast('Stundenplan hinzugefügt');
+    } catch (e) {
+      toast(String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), true);
+    } finally {
+      S.tt.busy = false;
+      await loadTimetable(true);
+    }
+  },
   async 'check-site'() {
     const url = $('#site').value.trim();
     if (!url) return;
@@ -343,12 +364,13 @@ function renderNav() {
   const unread = (S.data.notifications || []).filter((n) => !n.read).length + (S.data.newItems || []).length;
   nav.innerHTML = `
     <div class="brand" data-action="go" data-route="dashboard">
-      <div class="brand-mark">${icon('graduation')}</div><b>${esc(site.sitename || 'Campus Sync')}</b>
+      <div class="brand-mark">${icon('graduation')}</div><b>${esc(site.sitename || 'Chadoodle')}</b>
     </div>
     <nav class="primary-nav">
       <a href="#" data-action="go" data-route="dashboard" class="${r === 'dashboard' ? 'active' : ''}">Dashboard</a>
       <a href="#" data-action="go" data-route="courses" class="${['courses', 'course', 'module'].includes(r) ? 'active' : ''}">Meine Kurse</a>
       <a href="#" data-action="go" data-route="events" class="${r === 'events' ? 'active' : ''}">Termine</a>
+      <a href="#" data-action="go" data-route="timetable" class="${r === 'timetable' ? 'active' : ''}">Stundenplan</a>
     </nav>
     <form class="nav-search" data-submit="nav-search"><div class="input-icon">${icon('search', 'sm')}<input id="nav-q" class="input" placeholder="In Dokumenten suchen…" title="Strg+Umschalt+F" value="${esc(r === 'search' ? S.route.params.q || '' : '')}" /></div></form>
     <div class="spacer"></div>
@@ -385,7 +407,7 @@ function renderDropdown() {
   if (S.ui.dropdown === 'user') {
     const site = d.site || {};
     return `<div class="dropdown" style="width:290px">
-      <div class="dd-user"><div class="avatar">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</div><div><b>${esc(site.fullname)}</b><small class="muted" style="display:block">${esc(site.sitename)}</small><small class="muted" style="display:block">Campus Sync ${esc(S.state.version)}</small></div></div>
+      <div class="dd-user"><div class="avatar">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</div><div><b>${esc(site.fullname)}</b><small class="muted" style="display:block">${esc(site.sitename)}</small><small class="muted" style="display:block">Chadoodle ${esc(S.state.version)}</small></div></div>
       <div class="dd-sep"></div>
       <a class="dd-item" data-action="go" data-route="settings">${icon('settings')}<div>Einstellungen</div></a>
       <a class="dd-item" data-action="open-folder">${icon('folder')}<div>Download-Ordner öffnen</div></a>
@@ -451,6 +473,7 @@ function renderMain() {
   else if (r.name === 'course') html = renderCourse();
   else if (r.name === 'module') html = renderModule();
   else if (r.name === 'events') html = renderEventsPage();
+  else if (r.name === 'timetable') html = renderTimetable();
   else if (r.name === 'settings') html = renderSettings();
   else if (r.name === 'viewer') html = renderViewer();
   else if (r.name === 'search') html = renderSearch();
@@ -819,6 +842,180 @@ function renderModule() {
   </div>`;
 }
 
+// ---------- Stundenplan ----------
+const TT_DAY = 86400000;
+const TT_HOUR_PX = 54;
+const TT_DAYS = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
+
+function ttMonday(d) {
+  const m = new Date(d);
+  m.setHours(0, 0, 0, 0);
+  m.setDate(m.getDate() - ((m.getDay() + 6) % 7));
+  return m.getTime();
+}
+// Tage per Kalender addieren (nicht +24 h), damit die Zeitumstellung nichts verschiebt
+const ttAddDays = (ms, n) => { const d = new Date(ms); d.setDate(d.getDate() + n); return d.getTime(); };
+const ttClock = (ms) => new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+const ttHourOf = (ms) => (ms - new Date(ms).setHours(0, 0, 0, 0)) / 3600000;
+function ttIsoWeek(ms) {
+  const d = new Date(ms);
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
+  return Math.ceil(((t - Date.UTC(t.getUTCFullYear(), 0, 1)) / TT_DAY + 1) / 7);
+}
+// Gleiche Veranstaltung = gleiche Farbe (Dozentenkürzel in Klammern und Zusätze ignorieren)
+function ttColor(title) {
+  const base = String(title).replace(/\(.*$/, '').trim().toLowerCase();
+  let h = 0;
+  for (const c of base) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return h % 8;
+}
+
+async function loadTimetable(force = false) {
+  const t = S.tt;
+  if (!t.list || force) {
+    const r = await api.ttList();
+    t.list = r.list;
+    t.template = r.template;
+    t.active = t.list.some((x) => x.id === r.active) ? r.active : t.list[0] ? t.list[0].id : null;
+    // Noch nie geladen (z. B. Vorlage beim ersten Start): sofort abrufen statt eine leere Woche zu zeigen
+    const plan = t.list.find((x) => x.id === t.active);
+    if (plan && !plan.fetchedAt && !t.autoFetched) {
+      t.autoFetched = true;
+      t.busy = true;
+      if (S.route.name === 'timetable') renderMain();
+      await api.ttRefresh().catch(() => {});
+      t.busy = false;
+      return loadTimetable(true);
+    }
+  }
+  const key = `${t.active}|${t.week}`;
+  if (force || t.loadedKey !== key) {
+    t.loadedKey = key;
+    t.events = t.active ? await api.ttEvents(t.active, t.week, ttAddDays(t.week, 7)) : [];
+  }
+  if (S.route.name === 'timetable') renderMain();
+}
+
+// Überlappende Termine eines Tages nebeneinander in Spuren anordnen
+function ttLayoutDay(list) {
+  const items = list.map((e) => ({ e })).sort((a, b) => a.e.start - b.e.start || b.e.end - a.e.end);
+  let cluster = [];
+  let clusterEnd = 0;
+  const flush = () => {
+    const lanes = Math.max(1, ...cluster.map((x) => x.lane + 1));
+    for (const x of cluster) x.lanes = lanes;
+    cluster = [];
+  };
+  for (const it of items) {
+    if (cluster.length && it.e.start >= clusterEnd) flush();
+    const used = new Set(cluster.filter((x) => x.e.end > it.e.start).map((x) => x.lane));
+    let lane = 0;
+    while (used.has(lane)) lane++;
+    it.lane = lane;
+    cluster.push(it);
+    clusterEnd = Math.max(clusterEnd, it.e.end);
+  }
+  flush();
+  return items;
+}
+
+function placeNowLine() {
+  const line = $('#tt-now');
+  if (!line) return;
+  const top = (ttHourOf(Date.now()) - Number(line.dataset.from)) * TT_HOUR_PX;
+  line.style.top = `${top}px`;
+  line.hidden = top < 0 || top > Number(line.dataset.max);
+}
+
+function renderTimetable() {
+  const t = S.tt;
+  if (!t.list || t.loadedKey !== `${t.active}|${t.week}`) loadTimetable();
+  const plan = t.list && t.list.find((x) => x.id === t.active);
+  const range = `${new Date(t.week).toLocaleDateString('de-DE', { day: 'numeric', month: 'long' })} – ${new Date(ttAddDays(t.week, 6)).toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+  const isThisWeek = t.week === ttMonday(new Date());
+
+  const head = `<div class="page-head"><div><h1>Stundenplan</h1><p>${plan ? `${esc(plan.name)} · Stand ${relTime(plan.fetchedAt)}${plan.error ? ` · <span style="color:var(--warning)">${esc(plan.error)}</span>` : ''}` : 'Füge deinen Stundenplan-Link hinzu'}</p></div>
+    <div class="tt-nav">
+      ${t.list && t.list.length > 1 ? `<div class="segmented">${t.list.map((x) => `<button class="${x.id === t.active ? 'on' : ''}" data-action="tt-select" data-id="${esc(x.id)}">${esc(x.name)}</button>`).join('')}</div>` : ''}
+      <button class="btn sm ${isThisWeek ? '' : 'primary'}" data-action="tt-today">Heute</button>
+      <div class="segmented"><button data-action="tt-week" data-d="-1" title="Vorige Woche">${icon('chevleft', 'sm')}</button><button data-action="tt-week" data-d="1" title="Nächste Woche">${icon('chevright', 'sm')}</button></div>
+      <button class="icon-btn" data-action="tt-refresh" title="Jetzt aktualisieren">${icon('refresh', t.busy ? 'spin' : '')}</button>
+    </div></div>`;
+
+  let grid;
+  if (!t.list) grid = `<div class="card"><div class="empty">${icon('refresh', 'spin')}<div>Lade Stundenplan…</div></div></div>`;
+  else if (!plan) grid = `<div class="card"><div class="empty">${icon('calendar')}<div>Noch kein Stundenplan eingetragen. Füge unten einen Rapla- oder iCal-Link hinzu.</div></div></div>`;
+  else grid = ttWeekGrid(t.events, range);
+
+  return `<div class="page wide">${head}${grid}${ttManageCard()}</div>`;
+}
+
+function ttWeekGrid(events, range) {
+  const t = S.tt;
+  const timed = events.filter((e) => !e.allDay);
+  const allDay = events.filter((e) => e.allDay);
+  const weekend = timed.some((e) => e.start >= ttAddDays(t.week, 5));
+  const nDays = weekend ? 7 : 5;
+  const from = Math.max(6, Math.min(8, ...timed.map((e) => Math.floor(ttHourOf(e.start)))));
+  const to = Math.min(24, Math.max(18, ...timed.map((e) => Math.ceil(ttHourOf(e.end) || 24))));
+  const height = (to - from) * TT_HOUR_PX;
+  const today = new Date().setHours(0, 0, 0, 0);
+
+  const cols = [];
+  for (let i = 0; i < nDays; i++) {
+    const day = ttAddDays(t.week, i);
+    const next = ttAddDays(day, 1);
+    const dayEvents = timed.filter((e) => e.start >= day && e.start < next);
+    const holidays = allDay.filter((e) => e.start < next && e.end > day);
+    const blocks = ttLayoutDay(dayEvents).map(({ e, lane, lanes }) => {
+      const top = (ttHourOf(e.start) - from) * TT_HOUR_PX;
+      const h = Math.max(22, ((e.end - e.start) / 3600000) * TT_HOUR_PX - 3);
+      const room = e.location.split(/\s+/)[0] || '';
+      const tip = [e.title, `${ttClock(e.start)}–${ttClock(e.end)}`, e.location, e.persons.join(', ')].filter(Boolean).join('\n');
+      return `<button class="tt-ev c${ttColor(e.title)}${e.end < Date.now() ? ' past' : ''}${h < 44 ? ' short' : ''}" style="top:${top}px;height:${h}px;left:calc(${(lane / lanes) * 100}% + 2px);width:calc(${100 / lanes}% - 4px)" data-action="tt-event" data-i="${t.events.indexOf(e)}" title="${esc(tip)}">
+        <b>${esc(e.title)}</b><span class="tt-meta">${ttClock(e.start)}–${ttClock(e.end)}${room ? ` · ${esc(room)}` : ''}</span>${h > 80 && e.persons.length ? `<span class="tt-who">${esc(e.persons.join(', '))}</span>` : ''}
+      </button>`;
+    }).join('');
+    const isToday = day === today;
+    cols.push(`<div class="tt-col${isToday ? ' today' : ''}">
+      <div class="tt-day"><span>${TT_DAYS[i].slice(0, 2)}</span><b>${new Date(day).getDate()}.</b>${holidays.map((e) => `<em class="tt-holiday" title="${esc(e.title)}">${esc(e.title)}</em>`).join('')}</div>
+      <div class="tt-body" style="height:${height}px">${blocks}${isToday ? `<div class="tt-now" id="tt-now" data-from="${from}" data-max="${height}" hidden></div>` : ''}</div>
+    </div>`);
+  }
+  const hours = [];
+  for (let h = from; h < to; h++) hours.push(`<div class="tt-hour" style="top:${(h - from) * TT_HOUR_PX}px">${String(h).padStart(2, '0')}:00</div>`);
+  setTimeout(placeNowLine);
+  return `<div class="card tt-card">
+    <div class="tt-range"><b>KW ${ttIsoWeek(t.week)}</b><span>${range}</span><span class="muted">${timed.length} ${timed.length === 1 ? 'Termin' : 'Termine'}</span></div>
+    <div class="tt-grid" style="--days:${nDays}">
+      <div class="tt-gutter"><div class="tt-day"></div><div class="tt-body" style="height:${height}px">${hours.join('')}</div></div>
+      ${cols.join('')}
+    </div>
+  </div>`;
+}
+
+function ttManageCard() {
+  const t = S.tt;
+  const rows = (t.list || []).map((x) => `<div class="setting-row">
+      <div class="txt" style="min-width:0"><b>${esc(x.name)}${x.id === t.active ? ' <span class="chip info">angezeigt</span>' : ''}</b><small class="tt-url" title="${esc(x.url)}">${esc(x.url)}</small><small>${x.fetchedAt ? `${x.count} Termine · aktualisiert ${relTime(x.fetchedAt)}` : 'noch nicht geladen'}${x.error ? ` · <span style="color:var(--warning)">${esc(x.error)}</span>` : ''}</small></div>
+      <div class="ctl">${x.id !== t.active ? `<button class="btn sm" data-action="tt-select" data-id="${esc(x.id)}">Anzeigen</button>` : ''}<button class="btn sm ghost danger" data-action="tt-remove" data-id="${esc(x.id)}">Entfernen</button></div>
+    </div>`).join('');
+  return `<div class="card" style="margin-top:20px">
+    <div class="card-head"><h2>${icon('calendar')} Stundenpläne verwalten</h2></div>
+    <div class="card-body">
+      ${rows || '<p class="muted small" style="margin:0 0 8px">Noch keine Stundenpläne eingetragen.</p>'}
+      <form class="tt-form" data-submit="tt-add">
+        <input class="input" id="tt-name" data-input="tt-form" data-key="name" placeholder="Name, z. B. TSA25" value="${esc(t.form.name)}" />
+        <input class="input" id="tt-url" data-input="tt-form" data-key="url" placeholder="Rapla-Link oder iCal-Adresse (https://… oder webcal://…)" value="${esc(t.form.url)}" />
+        <button type="button" class="btn" data-action="tt-template" title="Rapla-Plan TSA25 der DHBW Ravensburg einsetzen">Vorlage TSA25</button>
+        <button class="btn primary" ${t.busy ? 'disabled' : ''}>${icon('plus', 'sm')} Hinzufügen</button>
+      </form>
+      <p class="muted small" style="margin:10px 0 0">Funktioniert mit Rapla-Links der DHBW (Ansicht oder Export) und mit jedem iCal-Kalender. Der Plan wird lokal gespeichert, ist offline verfügbar und wird alle zwei Stunden aktualisiert.</p>
+    </div>
+  </div>`;
+}
+
 function renderEventsPage() {
   const evs = S.data.events;
   return `<div class="page">
@@ -882,7 +1079,7 @@ function renderSettings() {
   } else if (tab === 'update') {
     const u = S.update || {};
     body = `<div class="card"><div class="card-head"><h2>${icon('download')} Updates</h2></div><div class="card-body">
-      ${row('Installierte Version', 'Campus Sync', `<span class="chip info">${esc(S.state.version)}</span>`)}
+      ${row('Installierte Version', 'Chadoodle', `<span class="chip info">${esc(S.state.version)}</span>`)}
       ${row('Status', esc(updateText(u)) + (u.state === 'error' && u.message ? `<br><span class="small muted">${esc(u.message)}</span>` : ''),
         u.state === 'ready' ? '<button class="btn sm primary" data-action="update-install">Neu starten & installieren</button>'
         : `<button class="btn sm" data-action="update-check" ${['dev', 'checking', 'downloading'].includes(u.state) ? 'disabled' : ''}>${icon('refresh', 'sm' + (u.state === 'checking' ? ' spin' : ''))} Nach Updates suchen</button>`)}
@@ -898,7 +1095,7 @@ function renderSettings() {
     body = `<div class="card"><div class="card-head"><h2>Konto</h2></div><div class="card-body">
       <div class="dd-user" style="padding:6px 0 14px"><div class="avatar" style="width:52px;height:52px">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</div><div><b style="font-size:16px">${esc(site.fullname)}</b><div class="muted small">${esc(site.sitename)} · ${esc(site.url)}</div><div class="muted small">Moodle ${esc(site.release || '')}</div></div></div>
       ${row('Abmelden', 'Entfernt das Zugriffstoken; lokale Dateien bleiben auf Wunsch erhalten', '<button class="btn sm danger" data-action="logout">Abmelden</button>')}
-      ${row('Version', 'Campus Sync', `<span class="muted">${esc(S.state.version)}</span>`)}
+      ${row('Version', 'Chadoodle', `<span class="muted">${esc(S.state.version)}</span>`)}
     </div></div>`;
   }
   return `<div class="page">
@@ -1485,7 +1682,7 @@ function showLimitModal() {
 function showWelcomeModal() {
   showModal(`<div class="cp-logo p-chatgpt" style="width:48px;height:48px;border-radius:14px;margin-bottom:12px">${icon('message')}</div>
     <h3>Du nutzt deinen ChatGPT-Plan</h3>
-    <p>Berechtigte KI-Anfragen in Campus Sync nutzen deinen ChatGPT-Plan${S.chatgpt && S.chatgpt.email ? ` (${esc(S.chatgpt.email)})` : ''}. Die Nutzung verwaltest du in deinen ChatGPT-Einstellungen – dort kannst du auch ein Wochenlimit für diese App setzen.</p>
+    <p>Berechtigte KI-Anfragen in Chadoodle nutzen deinen ChatGPT-Plan${S.chatgpt && S.chatgpt.email ? ` (${esc(S.chatgpt.email)})` : ''}. Die Nutzung verwaltest du in deinen ChatGPT-Einstellungen – dort kannst du auch ein Wochenlimit für diese App setzen.</p>
     <div class="row"><button class="btn" data-action="external" data-url="${MANAGE_USAGE_URL}">Nutzung verwalten</button><button class="btn primary" data-action="welcome-ok">Verstanden</button></div>`);
 }
 
@@ -1524,6 +1721,34 @@ function attachFile(id) {
 }
 
 const actions = {
+  'tt-week': (el) => { S.tt.week = ttAddDays(S.tt.week, 7 * Number(el.dataset.d)); loadTimetable(); },
+  'tt-today': () => { S.tt.week = ttMonday(new Date()); loadTimetable(); },
+  'tt-select': async (el) => { S.tt.active = el.dataset.id; await api.ttSelect(el.dataset.id); loadTimetable(true); },
+  'tt-remove': async (el) => {
+    const x = S.tt.list.find((p) => p.id === el.dataset.id);
+    if (!x || !confirm(`Stundenplan „${x.name}“ entfernen?`)) return;
+    await api.ttRemove(x.id);
+    loadTimetable(true);
+  },
+  'tt-template': () => { S.tt.form = { name: S.tt.template.name, url: S.tt.template.url }; renderMain(); },
+  'tt-refresh': async () => {
+    S.tt.busy = true;
+    renderMain();
+    await api.ttRefresh().catch(() => {});
+    S.tt.busy = false;
+    loadTimetable(true);
+  },
+  'tt-event': (el) => {
+    const e = S.tt.events[Number(el.dataset.i)];
+    if (!e) return;
+    const day = new Date(e.start).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
+    showModal(`<h3>${esc(e.title)}</h3>
+      <dl class="kv"><dt>Wann</dt><dd>${day}, ${ttClock(e.start)}–${ttClock(e.end)}</dd>
+      ${e.location ? `<dt>Raum</dt><dd>${esc(e.location)}</dd>` : ''}
+      ${e.persons.length ? `<dt>Dozent</dt><dd>${esc(e.persons.join(', '))}</dd>` : ''}
+      ${e.category ? `<dt>Art</dt><dd>${esc(e.category)}</dd>` : ''}</dl>
+      <div class="row"><button class="btn" data-action="modal-close">Schließen</button></div>`);
+  },
   go: (el) => {
     if (el.dataset.tab) S.ui.settingsTab = el.dataset.tab;
     go(el.dataset.route);
@@ -1788,6 +2013,7 @@ document.addEventListener('input', (e) => {
   const k = e.target.dataset && e.target.dataset.input;
   if (k === 'course-search') { S.ui.courseSearch = e.target.value; renderMain(); }
   else if (k === 'file-search') { S.ui.fileSearch = e.target.value; renderMain(); }
+  else if (k === 'tt-form') S.tt.form[e.target.dataset.key] = e.target.value;
   else if (k === 'chat-input') { S.chat.draft = e.target.value; autoGrow(e.target); }
 });
 

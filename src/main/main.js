@@ -3,11 +3,15 @@ const path = require('path');
 const fs = require('fs');
 // Eigenes Profil (für Tests/Demo); muss vor allem anderen gesetzt werden
 if (process.env.MOODLE_DESKTOP_USERDATA) app.setPath('userData', process.env.MOODLE_DESKTOP_USERDATA);
-// Bis 1.2.x hieß die App „Moodle Desktop“: deren Profil (Anmeldung, Einstellungen, Cache) weiterverwenden
+// Frühere Namen („Moodle Desktop“ bis 1.2, „Campus Sync“ in 1.3): deren Profil (Anmeldung,
+// Einstellungen, Cache) weiterverwenden – bevorzugt das, in dem wirklich Daten liegen
 else {
-  const legacy = path.join(app.getPath('appData'), 'Moodle Desktop');
-  const fresh = path.join(app.getPath('appData'), app.getName());
-  if (app.getPath('userData') === fresh && fs.existsSync(legacy)) {
+  const appData = app.getPath('appData');
+  const fresh = path.join(appData, app.getName());
+  const hasData = (dir) => fs.existsSync(path.join(dir, 'settings.json')) || fs.existsSync(path.join(dir, 'secrets.json'));
+  const old = ['Moodle Desktop', 'Campus Sync'].map((n) => path.join(appData, n));
+  const legacy = old.find(hasData) || old.find((d) => fs.existsSync(d));
+  if (app.getPath('userData') === fresh && legacy && !hasData(fresh)) {
     app.setPath('userData', legacy);
     // Electron legt den neuen Ordner schon beim Start leer an – nur dann entfernen, wenn er leer ist
     try {
@@ -25,9 +29,10 @@ const { ChatGPTAuth } = require('./chatgpt-auth');
 const { DocIndex } = require('./docindex');
 const { AiTools } = require('./ai-tools');
 const { Updater } = require('./updater');
+const { Timetables, RAPLA_TEMPLATE } = require('./timetable');
 
 const ICON = path.join(__dirname, '..', '..', 'build', 'icon.png');
-const APP_NAME = 'Campus Sync';
+const APP_NAME = 'Chadoodle';
 // Interne Kennung bleibt trotz Umbenennung gleich (Autostart-Eintrag, Taskleiste, Updates)
 const LOGIN_ITEM = 'de.rbenz.moodledesktop';
 // Versteckt starten: Autostart (--hidden) oder Neustart nach einem stillen Hintergrund-Update
@@ -44,6 +49,7 @@ let quitting = false;
 const sync = new SyncEngine();
 const docIndex = new DocIndex(sync);
 const aiTools = new AiTools(sync, docIndex);
+const timetables = new Timetables();
 const claude = new ClaudeAssistant(aiTools);
 const chatgptAuth = new ChatGPTAuth();
 const chatgpt = new ChatGPTAssistant(aiTools, chatgptAuth);
@@ -354,6 +360,18 @@ function registerIpc() {
     else shell.openPath(path.dirname(path.dirname(f)));
   });
 
+  // Stundenpläne
+  ipcMain.handle('tt:list', () => ({ list: timetables.list(), active: store.getSettings().timetableActive, template: RAPLA_TEMPLATE }));
+  ipcMain.handle('tt:events', (_e, id, from, to) => timetables.events(id, from, to));
+  ipcMain.handle('tt:add', async (_e, t) => {
+    const added = await timetables.add(t);
+    store.setSettings({ timetableActive: added.id });
+    return added;
+  });
+  ipcMain.handle('tt:remove', (_e, id) => timetables.remove(id));
+  ipcMain.handle('tt:select', (_e, id) => store.setSettings({ timetableActive: id }));
+  ipcMain.handle('tt:refresh', () => timetables.refreshAll());
+
   // Dokumente: Volltextsuche, Seiten, Rohdaten für den PDF-Viewer
   ipcMain.handle('doc:search', (_e, q, opts) => docIndex.search(q, opts || {}));
   ipcMain.handle('doc:status', () => docIndex.status());
@@ -386,6 +404,9 @@ app.whenReady().then(() => {
     note.on('click', showWindow);
     note.show();
   });
+
+  timetables.on('changed', () => send('tt:changed'));
+  timetables.start();
 
   updater.on('status', (st) => send('update:status', st));
   updater.start();

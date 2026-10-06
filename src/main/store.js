@@ -19,6 +19,9 @@ const DEFAULTS = {
   aiEffort: 'balanced',
   // Noten und Bewertungs-Feedback gehen nur mit ausdrücklicher Zustimmung an den KI-Anbieter
   aiGrades: false,
+  // Stundenpläne (iCal/Rapla); der TSA25-Plan ist als Vorlage vorbelegt
+  timetables: [{ id: 'tsa25', name: 'TSA25 · DHBW Ravensburg', url: 'https://rapla.dhbw.de/rapla/internal_calendar?user=muenzer@vw.ba.ba-ravensburg.de&file=TSA25' }],
+  timetableActive: 'tsa25',
 };
 
 function file(name) {
@@ -56,9 +59,10 @@ function getSettings() {
     }
     settings = { ...DEFAULTS, ...saved };
     if (!settings.downloadDir) {
-      // Bestehender Ordner aus der Zeit als „Moodle Desktop“ bleibt in Gebrauch (sonst würde alles neu geladen)
-      const legacy = path.join(app.getPath('documents'), 'Moodle Desktop');
-      settings.downloadDir = fs.existsSync(legacy) ? legacy : path.join(app.getPath('documents'), 'Campus Sync');
+      // Bestehender Ordner unter einem früheren App-Namen bleibt in Gebrauch (sonst würde alles neu geladen)
+      const docs = app.getPath('documents');
+      const legacy = ['Moodle Desktop', 'Campus Sync'].map((n) => path.join(docs, n)).find((d) => fs.existsSync(d));
+      settings.downloadDir = legacy || path.join(docs, 'Chadoodle');
     }
   }
   return settings;

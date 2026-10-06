@@ -1,18 +1,19 @@
 <p align="center"><img src="build/icon.png" width="96" alt="" /></p>
 
-<h1 align="center">Campus Sync</h1>
+<h1 align="center">Chadoodle</h1>
 
 <p align="center">Deine Moodle-Kurse als Windows-App: lokal synchronisiert, mit PDF-Viewer, Volltextsuche und einem KI-Lernassistenten (ChatGPT oder Claude).</p>
 
-<p align="center"><a href="https://github.com/roman-benz/campus-sync/releases/latest/download/CampusSync-Setup.exe"><b>⬇ Installer für Windows herunterladen</b></a> · <a href="https://github.com/roman-benz/campus-sync/releases">Alle Versionen</a></p>
+<p align="center"><a href="https://github.com/roman-benz/campus-sync/releases/latest/download/Chadoodle-Setup.exe"><b>⬇ Installer für Windows herunterladen</b></a> · <a href="https://github.com/roman-benz/campus-sync/releases">Alle Versionen</a></p>
 
 ---
 
 ## Funktionen
 
-- **Lokal statt Webseite:** Ein Sync-Dienst lädt im Hintergrund Kurse, Abschnitte, Aufgaben, Textseiten, Forenbeiträge, Termine, Noten und **alle Kursdateien** in einen Ordner (Standard: `Dokumente\Campus Sync\<Kurs>\<Abschnitt>\…`). Die Oberfläche liest nur diese lokale Kopie, ist dadurch schnell und funktioniert auch offline.
+- **Lokal statt Webseite:** Ein Sync-Dienst lädt im Hintergrund Kurse, Abschnitte, Aufgaben, Textseiten, Forenbeiträge, Termine, Noten und **alle Kursdateien** in einen Ordner (Standard: `Dokumente\Chadoodle\<Kurs>\<Abschnitt>\…`). Die Oberfläche liest nur diese lokale Kopie, ist dadurch schnell und funktioniert auch offline.
 - **Hintergrundbetrieb:** Startet mit Windows unsichtbar im Infobereich. Synchronisiert im eingestellten Intervall, nach dem Standby und beim Öffnen. Meldet neue Dateien und bald fällige Abgaben als Windows-Benachrichtigung.
 - **Dokumente in der App:** Eingebauter PDF-Viewer (pdf.js) mit Zoom, Seitensprung, markierbarem Text und Suche im Dokument. Word, PowerPoint und Excel erscheinen als Textansicht.
+- **Stundenplan:** Eigener Reiter mit Wochenansicht aus Rapla oder jedem iCal-Kalender (`https://…`, `webcal://…`). Der Rapla-Plan TSA25 der DHBW Ravensburg ist als Vorlage eingetragen; eigene Links lassen sich hinzufügen. Der Plan wird lokal gespeichert und ist offline verfügbar.
 - **Volltextsuche:** Alle Dokumente werden seitengenau indexiert. Die Suche in der Kopfzeile (Strg+Umschalt+F) findet Stellen in allen Skripten und springt direkt zur Seite.
 - **KI-Lernassistent** (Strg+K): Durchsucht die Unterlagen, liest die passenden Seiten und erklärt sie. Fundstellen erscheinen als Links, die im Viewer an der richtigen Seite öffnen. Markierten Text im Viewer kannst du direkt „erklären“ lassen.
   - **ChatGPT:** „Continue with ChatGPT“ nutzt deinen Plus- oder Pro-Plan, ohne API-Key ([Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source)).
@@ -22,7 +23,7 @@
 
 ## Installation
 
-1. [`CampusSync-Setup.exe`](https://github.com/roman-benz/campus-sync/releases/latest/download/CampusSync-Setup.exe) herunterladen und starten. Es sind keine Administratorrechte nötig.
+1. [`Chadoodle-Setup.exe`](https://github.com/roman-benz/campus-sync/releases/latest/download/Chadoodle-Setup.exe) herunterladen und starten. Es sind keine Administratorrechte nötig.
 2. Windows SmartScreen warnt beim ersten Start, weil der Installer nicht signiert ist: **„Weitere Informationen“ → „Trotzdem ausführen“**.
 3. Moodle-Adresse eingeben (voreingestellt: DHBW Ravensburg) und mit Kennwort oder über den Browser (SSO) anmelden.
 4. Optional unter **Einstellungen → KI-Assistent** ChatGPT verbinden oder einen Claude-API-Key hinterlegen.
@@ -73,6 +74,6 @@ npm run dist       # Installer lokal nach out/ bauen
 
 ## Lizenz
 
-[MIT](LICENSE) © 2026 Roman Benz. Bis Version 1.2 hieß die App „Moodle Desktop“; bestehende Installationen übernehmen Anmeldung, Einstellungen und Download-Ordner automatisch.
+[MIT](LICENSE) © 2026 Roman Benz. Die App hieß bis Version 1.2 „Moodle Desktop“ und in 1.3 „Campus Sync“; bestehende Installationen übernehmen Anmeldung, Einstellungen und Download-Ordner automatisch.
 
-Campus Sync ist ein unabhängiges Projekt und nicht mit Moodle Pty Ltd verbunden oder von ihr unterstützt. Moodle™ ist eine eingetragene Marke von Moodle Pty Ltd.
+Chadoodle ist ein unabhängiges Projekt und nicht mit Moodle Pty Ltd verbunden oder von ihr unterstützt. Moodle™ ist eine eingetragene Marke von Moodle Pty Ltd.

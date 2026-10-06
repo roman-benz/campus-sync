@@ -1,6 +1,6 @@
 {
   "name": "moodle-desktop",
-  "productName": "Campus Sync",
+  "productName": "Chadoodle",
   "version": "1.3.0",
   "description": "Desktop-App für Moodle-Kurse mit lokaler Hintergrund-Synchronisation, PDF-Viewer, Volltextsuche und KI-Lernassistent (ChatGPT oder Claude)",
   "main": "src/main/main.js",
@@ -30,7 +30,7 @@
   },
   "build": {
     "appId": "de.rbenz.moodledesktop",
-    "productName": "Campus Sync",
+    "productName": "Chadoodle",
     "directories": {
       "output": "out",
       "buildResources": "build"
@@ -52,8 +52,8 @@
       "runAfterFinish": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Campus Sync",
-      "artifactName": "CampusSync-Setup-${version}.exe",
+      "shortcutName": "Chadoodle",
+      "artifactName": "Chadoodle-Setup-${version}.exe",
       "include": "build/installer.nsh",
       "deleteAppDataOnUninstall": false
     },

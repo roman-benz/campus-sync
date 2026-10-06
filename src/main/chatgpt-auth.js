@@ -16,7 +16,7 @@ const SCOPES = 'openid profile email offline_access resource.invoke chatgpt.toke
 const PLAN_SCOPE = 'chatgpt.tokens.use.direct';
 const CALLBACK_PATH = '/auth/callback';
 const PORTS = [1455, 1456, 1457, 1458, 1459, 0];
-const APP_NAME = 'Campus Sync';
+const APP_NAME = 'Chadoodle';
 const SECRET_KEY = 'chatgptAccount';
 const REFRESH_FAIL = new Set(['invalid_grant', 'invalid_refresh_token', 'token_expired', 'refresh_token_invalidated', 'refresh_token_reused']);
 
@@ -238,7 +238,7 @@ class ChatGPTAuth {
         log(`Rückruf erhalten: ${Object.keys(q).join(', ')}${q.error ? ' error=' + q.error : ''}`);
         browserRes = res;
         if (q.error) {
-          respond('Anmeldung nicht abgeschlossen', 'Du kannst dieses Fenster schließen und es in Campus Sync erneut versuchen.', false);
+          respond('Anmeldung nicht abgeschlossen', 'Du kannst dieses Fenster schließen und es in Chadoodle erneut versuchen.', false);
           return finish(Object.assign(new Error(q.error_description || q.error), { code: q.error }));
         }
         if (q.state !== state || !q.code) {
@@ -294,13 +294,13 @@ class ChatGPTAuth {
         throw e;
       }
       log('Login erfolgreich');
-      respond('Mit ChatGPT verbunden', 'Du kannst dieses Fenster schließen und zu Campus Sync zurückkehren.', true);
+      respond('Mit ChatGPT verbunden', 'Du kannst dieses Fenster schließen und zu Chadoodle zurückkehren.', true);
       return this.status();
     } catch (e) {
       if (e.code === 'invalid_grant' && attempt === 1) {
-        respond('Einen Moment …', 'Campus Sync schließt die Anmeldung in einem neuen Tab ab. Dieses Fenster kannst du schließen.', true);
+        respond('Einen Moment …', 'Chadoodle schließt die Anmeldung in einem neuen Tab ab. Dieses Fenster kannst du schließen.', true);
       } else {
-        respond('Anmeldung fehlgeschlagen', 'Bitte in Campus Sync erneut versuchen.', false);
+        respond('Anmeldung fehlgeschlagen', 'Bitte in Chadoodle erneut versuchen.', false);
       }
       throw e;
     } finally {

@@ -101,7 +101,7 @@ class DocIndex extends EventEmitter {
   }
 
   startWorker() {
-    this.worker = utilityProcess.fork(path.join(__dirname, 'indexer-worker.js'), [], { serviceName: 'Campus Sync Index' });
+    this.worker = utilityProcess.fork(path.join(__dirname, 'indexer-worker.js'), [], { serviceName: 'Chadoodle Index' });
     this.worker.on('message', (msg) => this.onResult(msg));
     this.worker.on('exit', () => {
       this.worker = null;

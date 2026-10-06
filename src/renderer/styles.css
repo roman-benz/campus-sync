@@ -1,4 +1,4 @@
-/* Campus Sync – Moodle-4-Grunddesign, moderner interpretiert */
+/* Chadoodle – Moodle-4-Grunddesign, moderner interpretiert */
 :root {
   --primary: #0f6cbf;
   --primary-hover: #0c5aa0;
@@ -718,3 +718,43 @@ mark { background: rgba(255, 196, 0, .45); color: inherit; border-radius: 3px; p
 .cp-model { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
 .cp-model .select { height: 30px; font-size: 12.5px; flex: 1; min-width: 0; padding: 0 8px; }
 .waiting { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12.5px; }
+
+/* ---------- Stundenplan ---------- */
+.tt-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tt-nav .segmented button { height: 28px; }
+.tt-card { overflow: hidden; }
+.tt-range { display: flex; align-items: baseline; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.tt-range b { font-family: var(--font-display); font-size: 17px; }
+.tt-range .muted { margin-left: auto; font-size: 12.5px; }
+.tt-grid { display: grid; grid-template-columns: 58px repeat(var(--days), minmax(0, 1fr)); }
+.tt-col { border-left: 1px solid var(--border); min-width: 0; }
+.tt-col.today { background: color-mix(in srgb, var(--primary) 5%, transparent); }
+.tt-day { height: 58px; padding: 8px 10px 6px; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 7px; overflow: hidden; }
+.tt-day span { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.tt-day b { font-size: 17px; }
+.tt-col.today .tt-day span, .tt-col.today .tt-day b { color: var(--primary-text); }
+.tt-holiday { flex-basis: 100%; font-style: normal; font-size: 11.5px; font-weight: 600; color: var(--warning); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-body { position: relative; background-image: repeating-linear-gradient(180deg, var(--border) 0 1px, transparent 1px 54px); background-position: 0 -1px; }
+.tt-gutter .tt-body { background: none; }
+.tt-hour { position: absolute; right: 8px; transform: translateY(-50%); font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tt-hour:first-child { transform: none; }
+.tt-ev {
+  position: absolute; display: flex; flex-direction: column; gap: 1px; padding: 5px 7px; overflow: hidden; text-align: left; cursor: pointer;
+  border: 0; border-left: 3px solid var(--c); border-radius: 6px; color: var(--text);
+  background: color-mix(in srgb, var(--c) 15%, var(--surface)); transition: background .15s, box-shadow .15s; font: inherit;
+}
+.tt-ev:hover { background: color-mix(in srgb, var(--c) 24%, var(--surface)); box-shadow: var(--shadow); z-index: 2; }
+.tt-ev.past { opacity: .6; }
+.tt-ev.short { flex-direction: row; align-items: center; gap: 6px; padding: 2px 6px; }
+.tt-ev.short b { -webkit-line-clamp: 1; flex: 1; min-width: 0; white-space: nowrap; text-overflow: ellipsis; display: block; }
+.tt-ev.short .tt-meta { flex: none; }
+.tt-ev b { font-size: 12.5px; font-weight: 650; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.tt-meta, .tt-who { font-size: 11.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.tt-who { color: var(--muted); }
+.tt-ev.c0 { --c: var(--act-content); } .tt-ev.c1 { --c: var(--act-assessment); } .tt-ev.c2 { --c: var(--act-collab); } .tt-ev.c3 { --c: var(--act-comm); }
+.tt-ev.c4 { --c: var(--act-interactive); } .tt-ev.c5 { --c: var(--act-admin); } .tt-ev.c6 { --c: var(--primary); } .tt-ev.c7 { --c: var(--claude); }
+.tt-now { position: absolute; left: 0; right: 0; height: 2px; background: var(--danger); z-index: 3; pointer-events: none; }
+.tt-now::before { content: ""; position: absolute; left: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+.tt-form { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(240px, 3fr) auto auto; gap: 8px; margin-top: 14px; }
+.tt-url { display: block; font-family: Consolas, monospace; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 640px; }
+@media (max-width: 1100px) { .tt-form { grid-template-columns: 1fr 1fr; } }

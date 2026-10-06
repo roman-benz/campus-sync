@@ -28,17 +28,17 @@ jobs:
         run: npx electron-builder --win nsis --publish never
 
       # Ein Release mit allen Dateien: Installer, blockmap (Differenz-Updates), latest.yml (Auto-Update)
-      # und der Installer unter festem Namen für .../releases/latest/download/CampusSync-Setup.exe
+      # und der Installer unter festem Namen für .../releases/latest/download/Chadoodle-Setup.exe
       - name: Release veröffentlichen
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
-          Copy-Item "out/CampusSync-Setup-$version.exe" "out/CampusSync-Setup.exe"
+          Copy-Item "out/Chadoodle-Setup-$version.exe" "out/Chadoodle-Setup.exe"
           gh release create "v$version" `
-            "out/CampusSync-Setup-$version.exe" `
-            "out/CampusSync-Setup-$version.exe.blockmap" `
+            "out/Chadoodle-Setup-$version.exe" `
+            "out/Chadoodle-Setup-$version.exe.blockmap" `
             "out/latest.yml" `
-            "out/CampusSync-Setup.exe" `
-            --title "Campus Sync $version" --generate-notes
+            "out/Chadoodle-Setup.exe" `
+            --title "Chadoodle $version" --generate-notes
