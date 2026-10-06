@@ -32,6 +32,7 @@ const S = {
   index: null,
   search: null,
   // Stundenplan: Liste der Pläne, angezeigte Woche (Montag 0 Uhr) und deren Termine
+  mensa: { data: null, day: null, busy: false, error: '', url: null, defaultUrl: null, form: '' },
   tt: { list: null, active: null, template: null, week: ttMonday(new Date()), events: [], loadedKey: null, busy: false, form: { name: '', url: '' } },
 };
 // Aktiver Chat = Chat des gewählten KI-Anbieters
@@ -172,6 +173,7 @@ async function boot() {
   api.onSyncStatus((st) => { S.status = st; renderSyncPill(); });
   api.onDataUpdated(async () => { S.data = await api.data(); renderNav(); renderLeft(); renderMain(); });
   api.onFilesUpdated(async () => { S.data = await api.data(); if (['course', 'module', 'dashboard'].includes(S.route.name)) renderMain(); });
+  api.onMensa(() => { if (S.route.name === 'mensa') loadMensa(); });
   api.onTimetables(() => { if (S.route.name === 'timetable') loadTimetable(true); });
   setInterval(() => {
     placeNowLine();
@@ -294,6 +296,26 @@ async function loginDone() {
 }
 
 const submits = {
+  async 'mensa-url'() {
+    const m = S.mensa;
+    const url = (m.form || '').trim();
+    if (!url || url === m.url) return;
+    m.busy = true;
+    renderMain();
+    try {
+      m.data = await api.mensaSetUrl(url);
+      m.url = url;
+      m.form = '';
+      m.error = '';
+      m.day = null;
+      toast('Mensa übernommen');
+    } catch (e) {
+      toast(String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), true);
+    } finally {
+      m.busy = false;
+      loadMensa();
+    }
+  },
   async 'tt-add'() {
     const f = S.tt.form;
     if (!f.url.trim()) return toast('Bitte einen Link eingeben.', true);
@@ -378,6 +400,7 @@ function renderNav() {
       <a href="#" data-action="go" data-route="courses" class="${['courses', 'course', 'module'].includes(r) ? 'active' : ''}">Meine Kurse</a>
       <a href="#" data-action="go" data-route="events" class="${r === 'events' ? 'active' : ''}">Termine</a>
       <a href="#" data-action="go" data-route="timetable" class="${r === 'timetable' ? 'active' : ''}">Stundenplan</a>
+      <a href="#" data-action="go" data-route="mensa" class="${r === 'mensa' ? 'active' : ''}">Mensa</a>
     </nav>
     <form class="nav-search" data-submit="nav-search"><div class="input-icon">${icon('search', 'sm')}<input id="nav-q" class="input" placeholder="In Dokumenten suchen…" title="Strg+Umschalt+F" value="${esc(r === 'search' ? S.route.params.q || '' : '')}" /></div></form>
     <div class="spacer"></div>
@@ -481,6 +504,7 @@ function renderMain() {
   else if (r.name === 'module') html = renderModule();
   else if (r.name === 'events') html = renderEventsPage();
   else if (r.name === 'timetable') html = renderTimetable();
+  else if (r.name === 'mensa') html = renderMensa();
   else if (r.name === 'settings') html = renderSettings();
   else if (r.name === 'viewer') html = renderViewer();
   else if (r.name === 'search') html = renderSearch();
@@ -847,6 +871,90 @@ function renderModule() {
     </div>
     <div class="stack">${blocks.join('')}</div>
   </div>`;
+}
+
+// ---------- Mensa ----------
+const euro = (n) => (n == null ? '' : n.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' }));
+
+async function loadMensa(force = false) {
+  const m = S.mensa;
+  if (m.busy) return;
+  m.busy = true;
+  if (S.route.name === 'mensa' && force) renderMain();
+  try {
+    if (!m.url) Object.assign(m, await api.mensaUrl());
+    m.data = await api.mensaGet(force);
+    m.error = m.data.error || '';
+    // Standard: heute, sonst der nächste Tag mit Essen
+    if (!m.data.days.some((d) => d.date === m.day)) {
+      const today = new Date().toLocaleDateString('sv-SE');
+      m.day = (m.data.days.find((d) => d.date >= today) || m.data.days[0] || {}).date || null;
+    }
+  } catch (e) {
+    m.error = String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+  } finally {
+    m.busy = false;
+    if (S.route.name === 'mensa') renderMain();
+  }
+}
+
+function dishTags(e) {
+  const diet = e.tags.filter((t) => t.diet).map((t) => `<span class="diet diet-${esc(t.code.toLowerCase())}">${esc(t.text)}</span>`).join('');
+  const allergens = e.tags.filter((t) => !t.diet).map((t) => t.text);
+  return { diet, allergens };
+}
+
+function renderMensa() {
+  const m = S.mensa;
+  if (!m.data && !m.error) loadMensa();
+  const d = m.data;
+  const day = d && d.days.find((x) => x.date === m.day);
+  const dayBtn = (x) => {
+    const short = x.weekday ? x.weekday.slice(0, 2) : '';
+    const rel = /^(heute|morgen)$/i.test(x.rel) ? x.rel[0].toUpperCase() + x.rel.slice(1) : `${short} ${x.label.replace(/^.*?,\s*/, '').replace(/\d{4}$/, '')}`;
+    return `<button class="${x.date === m.day ? 'on' : ''}" data-action="mensa-day" data-v="${esc(x.date)}">${esc(rel)}</button>`;
+  };
+
+  const head = `<div class="page-head"><div><h1>${esc(d ? d.name : 'Mensa')}</h1><p>${d ? `Speiseplan · Stand ${relTime(d.fetchedAt)}` : 'Speiseplan'}${m.error ? ` · <span style="color:var(--warning)">${esc(m.error)}</span>` : ''}</p></div>
+    <div class="tt-nav">
+      ${d && d.days.length ? `<div class="segmented">${d.days.map(dayBtn).join('')}</div>` : ''}
+      <button class="icon-btn" data-action="mensa-refresh" title="Jetzt aktualisieren">${icon('refresh', m.busy ? 'spin' : '')}</button>
+    </div></div>`;
+
+  let body;
+  if (!d && !m.error) body = `<div class="card"><div class="empty">${icon('refresh', 'spin')}<div>Lade Speiseplan…</div></div></div>`;
+  else if (!d) body = `<div class="card"><div class="empty">${icon('cloudoff')}<div>Speiseplan konnte nicht geladen werden.</div></div></div>`;
+  else if (!day) body = `<div class="card"><div class="empty">${icon('calendar')}<div>Für die nächsten Tage ist noch kein Speiseplan veröffentlicht.</div></div></div>`;
+  else {
+    body = `<div class="mensa-day-title"><b>${esc(day.weekday || day.label)}</b><span>${esc(day.label.replace(/^.*?,\s*/, ''))}</span></div>
+      <div class="mensa-grid">${day.dishes.map((e, i) => {
+        const { diet, allergens } = dishTags(e);
+        return `<article class="dish" data-action="mensa-dish" data-i="${i}">
+          <div class="dish-img${e.thumb ? '' : ' noimg'}">${e.thumb ? `<img src="${esc(e.image || e.thumb)}" alt="" loading="lazy" />` : icon('clipboard')}${diet ? `<div class="dish-diet">${diet}</div>` : ''}</div>
+          <div class="dish-body">
+            <div class="dish-cat">${esc(e.category)}</div>
+            <h3>${esc(e.title)}</h3>
+            ${e.description ? `<p>${esc(e.description)}</p>` : ''}
+            ${allergens.length ? `<div class="dish-allergens" title="Allergene und Kennzeichnungen">${esc(allergens.join(' · '))}</div>` : ''}
+            <div class="dish-price">${e.prices.dhbw != null ? `<b>${euro(e.prices.dhbw)}</b><span>DHBW</span>` : ''}<small>${[e.prices.intern != null ? `intern ${euro(e.prices.intern)}` : '', e.prices.extern != null ? `extern ${euro(e.prices.extern)}` : ''].filter(Boolean).join(' · ')}</small></div>
+          </div>
+        </article>`;
+      }).join('')}</div>`;
+  }
+
+  const custom = m.url && m.url !== m.defaultUrl;
+  const settings = `<div class="card" style="margin-top:22px"><div class="card-head"><h2>${icon('settings')} Mensa</h2>
+      <button class="btn ghost sm" data-action="external" data-url="${esc(m.url || '')}">${icon('external', 'sm')} Bei my-mensa öffnen</button></div>
+    <div class="card-body">
+      <form class="tt-form mensa-form" data-submit="mensa-url">
+        <input class="input" id="mensa-url" data-input="mensa-form" placeholder="Link zur Mensa auf my-mensa.de" value="${esc(m.form || m.url || '')}" />
+        ${custom ? '<button type="button" class="btn" data-action="mensa-default">Fallenbrunnen</button>' : ''}
+        <button class="btn primary" ${m.busy ? 'disabled' : ''}>Übernehmen</button>
+      </form>
+      <p class="muted small" style="margin:10px 0 0">Funktioniert mit jeder Mensa auf my-mensa.de. Der Speiseplan wird lokal gespeichert und regelmäßig aktualisiert; Fotos werden direkt von my-mensa geladen.</p>
+    </div></div>`;
+
+  return `<div class="page wide">${head}${body}${settings}</div>`;
 }
 
 // ---------- Stundenplan ----------
@@ -1797,6 +1905,40 @@ function attachFile(id) {
 }
 
 const actions = {
+  'mensa-day': (el) => { S.mensa.day = el.dataset.v; renderMain(); },
+  'mensa-refresh': () => loadMensa(true),
+  'mensa-default': async () => {
+    S.mensa.busy = true;
+    renderMain();
+    try {
+      S.mensa.data = await api.mensaSetUrl(S.mensa.defaultUrl);
+      S.mensa.url = S.mensa.defaultUrl;
+      S.mensa.form = '';
+      S.mensa.day = null;
+    } catch (e) {
+      toast(String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), true);
+    } finally {
+      S.mensa.busy = false;
+      loadMensa();
+    }
+  },
+  'mensa-dish': (el) => {
+    const day = S.mensa.data && S.mensa.data.days.find((x) => x.date === S.mensa.day);
+    const e = day && day.dishes[Number(el.dataset.i)];
+    if (!e) return;
+    const { diet, allergens } = dishTags(e);
+    showModal(`${e.image ? `<img class="dish-big" src="${esc(e.image)}" alt="" />` : ''}
+      <div class="dish-cat">${esc(e.category)}</div><h3>${esc(e.title)}</h3>
+      ${e.description ? `<p>${esc(e.description)}</p>` : ''}
+      ${diet ? `<div class="dish-tags-row">${diet}</div>` : ''}
+      <dl class="kv small" style="margin-top:12px">
+        ${e.prices.dhbw != null ? `<dt>DHBW</dt><dd>${euro(e.prices.dhbw)}</dd>` : ''}
+        ${e.prices.intern != null ? `<dt>Intern</dt><dd>${euro(e.prices.intern)}</dd>` : ''}
+        ${e.prices.extern != null ? `<dt>Extern</dt><dd>${euro(e.prices.extern)}</dd>` : ''}
+        ${allergens.length ? `<dt>Enthält</dt><dd>${esc(allergens.join(', '))}</dd>` : ''}
+      </dl>
+      <div class="row"><button class="btn" data-action="modal-close">Schließen</button></div>`);
+  },
   'tt-week': (el) => { S.tt.week = ttAddDays(S.tt.week, 7 * Number(el.dataset.d)); loadTimetable(); },
   'tt-today': () => { S.tt.week = ttMonday(new Date()); loadTimetable(); },
   'tt-select': async (el) => { S.tt.active = el.dataset.id; await api.ttSelect(el.dataset.id); loadTimetable(true); },
@@ -2090,6 +2232,7 @@ document.addEventListener('input', (e) => {
   if (k === 'course-search') { S.ui.courseSearch = e.target.value; renderMain(); }
   else if (k === 'file-search') { S.ui.fileSearch = e.target.value; renderMain(); }
   else if (k === 'tt-form') S.tt.form[e.target.dataset.key] = e.target.value;
+  else if (k === 'mensa-form') S.mensa.form = e.target.value;
   else if (k === 'chat-input') { S.chat.draft = e.target.value; autoGrow(e.target); }
 });
 

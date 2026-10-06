@@ -30,6 +30,7 @@ const { DocIndex } = require('./docindex');
 const { AiTools } = require('./ai-tools');
 const { Updater } = require('./updater');
 const { Timetables, RAPLA_TEMPLATE } = require('./timetable');
+const { Mensa, DEFAULT_URL: MENSA_DEFAULT } = require('./mensa');
 
 const ICON = path.join(__dirname, '..', '..', 'build', 'icon.png');
 const APP_NAME = 'Chadoodle';
@@ -50,6 +51,7 @@ const sync = new SyncEngine();
 const docIndex = new DocIndex(sync);
 const aiTools = new AiTools(sync, docIndex);
 const timetables = new Timetables();
+const mensa = new Mensa();
 const claude = new ClaudeAssistant(aiTools);
 const chatgptAuth = new ChatGPTAuth();
 const chatgpt = new ChatGPTAssistant(aiTools, chatgptAuth);
@@ -372,6 +374,11 @@ function registerIpc() {
   ipcMain.handle('tt:select', (_e, id) => store.setSettings({ timetableActive: id }));
   ipcMain.handle('tt:refresh', () => timetables.refreshAll());
 
+  // Mensa-Speiseplan
+  ipcMain.handle('mensa:get', (_e, force) => mensa.get(!!force));
+  ipcMain.handle('mensa:set-url', (_e, url) => mensa.setUrl(url || MENSA_DEFAULT));
+  ipcMain.handle('mensa:url', () => ({ url: mensa.url(), defaultUrl: MENSA_DEFAULT }));
+
   // Dokumente: Volltextsuche, Seiten, Rohdaten für den PDF-Viewer
   ipcMain.handle('doc:search', (_e, q, opts) => docIndex.search(q, opts || {}));
   ipcMain.handle('doc:status', () => docIndex.status());
@@ -407,6 +414,8 @@ app.whenReady().then(() => {
 
   timetables.on('changed', () => send('tt:changed'));
   timetables.start();
+  mensa.on('changed', () => send('mensa:changed'));
+  mensa.start();
 
   updater.on('status', (st) => send('update:status', st));
   updater.start();
