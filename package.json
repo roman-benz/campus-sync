@@ -1,7 +1,7 @@
 {
   "name": "moodle-desktop",
   "productName": "Chadoodle",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Desktop-App für Moodle-Kurse mit lokaler Hintergrund-Synchronisation, PDF-Viewer, Volltextsuche und KI-Lernassistent (ChatGPT oder Claude)",
   "main": "src/main/main.js",
   "author": "Roman Benz",
