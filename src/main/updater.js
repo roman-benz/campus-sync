@@ -37,7 +37,10 @@ class Updater extends EventEmitter {
     autoUpdater.on('download-progress', (p) => this.set({ state: 'downloading', progress: Math.round(p.percent) }));
     autoUpdater.on('update-downloaded', (info) => {
       this.set({ state: 'ready', version: info.version, progress: 100 });
-      this.tryInstallSilently();
+      // Gerade beschäftigt (Sync, Chat, Index) oder Fenster offen? Dann jede Minute erneut probieren.
+      if (!this.tryInstallSilently() && !this.retry) {
+        this.retry = setInterval(() => this.tryInstallSilently() && clearInterval(this.retry), 60 * 1000);
+      }
     });
     autoUpdater.on('error', (err) => this.set({ state: 'error', message: String(err && err.message ? err.message : err).split('\n')[0], lastCheck: Date.now() }));
 
