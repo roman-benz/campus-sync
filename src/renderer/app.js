@@ -171,7 +171,12 @@ async function boot() {
   api.onDataUpdated(async () => { S.data = await api.data(); renderNav(); renderLeft(); renderMain(); });
   api.onFilesUpdated(async () => { S.data = await api.data(); if (['course', 'module', 'dashboard'].includes(S.route.name)) renderMain(); });
   api.onTimetables(() => { if (S.route.name === 'timetable') loadTimetable(true); });
-  setInterval(placeNowLine, 60 * 1000);
+  setInterval(() => {
+    placeNowLine();
+    // Neue Woche angebrochen: Termine der aktuellen Woche neu laden, sonst nur die Anzeige auffrischen
+    if (S.route.name === 'timetable' && S.tt.nowKey && S.tt.nowKey !== `${S.tt.active}|${ttMonday(new Date())}`) loadTimetable();
+    else updateTtProgress();
+  }, 30 * 1000);
   api.onAuthExpired(() => toast('Moodle-Sitzung abgelaufen – bitte neu anmelden.', true));
   api.onAi(onAiEvent);
   api.onIndexStatus((st) => {
@@ -894,6 +899,12 @@ async function loadTimetable(force = false) {
     t.loadedKey = key;
     t.events = t.active ? await api.ttEvents(t.active, t.week, ttAddDays(t.week, 7)) : [];
   }
+  const thisWeek = ttMonday(new Date());
+  const nowKey = `${t.active}|${thisWeek}`;
+  if (force || t.nowKey !== nowKey) {
+    t.nowKey = nowKey;
+    t.nowEvents = !t.active ? [] : t.week === thisWeek ? t.events : await api.ttEvents(t.active, thisWeek, ttAddDays(thisWeek, 7));
+  }
   if (S.route.name === 'timetable') renderMain();
 }
 
@@ -918,6 +929,69 @@ function ttLayoutDay(list) {
   }
   flush();
   return items;
+}
+
+// Geschaffte Vorlesungszeit: Überschneidungen zusammenfassen, damit nichts doppelt zählt
+function ttDone(events, from, to, now) {
+  const iv = events
+    .filter((e) => !e.allDay && e.end > from && e.start < to)
+    .map((e) => [Math.max(e.start, from), Math.min(e.end, to)])
+    .sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const [a, b] of iv) {
+    const last = merged[merged.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else merged.push([a, b]);
+  }
+  let total = 0;
+  let done = 0;
+  for (const [a, b] of merged) {
+    total += b - a;
+    done += Math.max(0, Math.min(b, now) - a);
+  }
+  return { total, done, pct: total ? Math.min(100, Math.round((done / total) * 100)) : null };
+}
+
+const ttMins = (ms) => {
+  const m = Math.round(ms / 60000);
+  return m >= 60 ? `${Math.floor(m / 60)} Std. ${m % 60 ? (m % 60) + ' Min.' : ''}`.trim() : `${m} Min.`;
+};
+
+function ttProgressHtml() {
+  const events = (S.tt.nowEvents || []).filter((e) => !e.allDay);
+  const now = Date.now();
+  const today = new Date().setHours(0, 0, 0, 0);
+  const tomorrow = ttAddDays(today, 1);
+  const week = ttMonday(new Date());
+
+  // Stunde: laufende Vorlesung (bei Überschneidung die, die zuerst endet)
+  const running = events.filter((e) => e.start <= now && e.end > now).sort((a, b) => a.end - b.end)[0];
+  const next = events.filter((e) => e.start > now && e.start < tomorrow).sort((a, b) => a.start - b.start)[0];
+  let lesson;
+  if (running) {
+    const pct = Math.min(100, Math.floor(((now - running.start) / (running.end - running.start)) * 100));
+    lesson = { pct, title: running.title, sub: `noch ${ttMins(running.end - now)} · bis ${ttClock(running.end)}` };
+  } else if (next) {
+    lesson = { pct: null, title: 'Gerade keine Vorlesung', sub: `Nächste: ${next.title} um ${ttClock(next.start)}` };
+  } else {
+    lesson = { pct: null, title: 'Gerade keine Vorlesung', sub: events.some((e) => e.start >= today && e.start < tomorrow) ? 'Für heute geschafft' : 'Heute keine Vorlesungen' };
+  }
+
+  const day = ttDone(events, today, tomorrow, now);
+  const wk = ttDone(events, week, ttAddDays(week, 7), now);
+  const item = (label, pct, title, sub) => `<div class="ttp-item">
+      <div class="ttp-top"><span class="ttp-label">${label}</span><b class="ttp-pct">${pct == null ? '–' : pct + '<small> %</small>'}</b></div>
+      <div class="progress"><i style="width:${pct || 0}%"></i></div>
+      <div class="ttp-title" title="${esc(title)}">${esc(title)}</div><div class="ttp-sub">${esc(sub)}</div>
+    </div>`;
+  return item('Stunde', lesson.pct, lesson.title, lesson.sub)
+    + item('Tag', day.pct, day.total ? `${ttMins(day.done)} von ${ttMins(day.total)}` : 'Heute frei', day.total ? (day.done >= day.total ? 'Alles geschafft' : `noch ${ttMins(day.total - day.done)}`) : 'Keine Vorlesungen heute')
+    + item('Woche', wk.pct, wk.total ? `${ttMins(wk.done)} von ${ttMins(wk.total)}` : 'Diese Woche frei', wk.total ? (wk.done >= wk.total ? 'Alles geschafft' : `noch ${ttMins(wk.total - wk.done)}`) : 'Keine Vorlesungen diese Woche');
+}
+
+function updateTtProgress() {
+  const el = $('#tt-progress');
+  if (el) el.innerHTML = ttProgressHtml();
 }
 
 function placeNowLine() {
@@ -946,7 +1020,7 @@ function renderTimetable() {
   let grid;
   if (!t.list) grid = `<div class="card"><div class="empty">${icon('refresh', 'spin')}<div>Lade Stundenplan…</div></div></div>`;
   else if (!plan) grid = `<div class="card"><div class="empty">${icon('calendar')}<div>Noch kein Stundenplan eingetragen. Füge unten einen Rapla- oder iCal-Link hinzu.</div></div></div>`;
-  else grid = ttWeekGrid(t.events, range);
+  else grid = `<div class="card tt-progress" id="tt-progress">${ttProgressHtml()}</div>${ttWeekGrid(t.events, range)}`;
 
   return `<div class="page wide">${head}${grid}${ttManageCard()}</div>`;
 }
