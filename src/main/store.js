@@ -17,6 +17,8 @@ const DEFAULTS = {
   aiProvider: 'claude',
   chatgptModel: '',
   aiEffort: 'balanced',
+  // Noten und Bewertungs-Feedback gehen nur mit ausdrücklicher Zustimmung an den KI-Anbieter
+  aiGrades: false,
 };
 
 function file(name) {
@@ -54,7 +56,9 @@ function getSettings() {
     }
     settings = { ...DEFAULTS, ...saved };
     if (!settings.downloadDir) {
-      settings.downloadDir = path.join(app.getPath('documents'), 'Moodle Desktop');
+      // Bestehender Ordner aus der Zeit als „Moodle Desktop“ bleibt in Gebrauch (sonst würde alles neu geladen)
+      const legacy = path.join(app.getPath('documents'), 'Moodle Desktop');
+      settings.downloadDir = fs.existsSync(legacy) ? legacy : path.join(app.getPath('documents'), 'Campus Sync');
     }
   }
   return settings;

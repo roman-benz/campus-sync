@@ -2,7 +2,7 @@
 // Responses API mit store:false + stream:true; Verlauf wird lokal gehalten und komplett mitgeschickt.
 const { OpenAI } = require('openai');
 const store = require('./store');
-const { TOOL_SPECS, validateInput, instructions } = require('./ai-tools');
+const { toolSpecs, validateInput, instructions } = require('./ai-tools');
 const { AuthRequiredError, log } = require('./chatgpt-auth');
 
 // Basis-URL nur für Tests überschreibbar
@@ -10,7 +10,7 @@ const API_BASE = process.env.MOODLE_DESKTOP_OPENAI_BASE || 'https://api.openai.c
 const EFFORT = { fast: 'low', balanced: 'medium', thorough: 'high' };
 const FIRST_EVENT_TIMEOUT_MS = 90 * 1000;
 const IDLE_TIMEOUT_MS = 4 * 60 * 1000;
-const FUNCTIONS = TOOL_SPECS.map((t) => ({ type: 'function', name: t.name, description: t.description, parameters: t.input_schema, strict: false }));
+const functions = () => toolSpecs().map((t) => ({ type: 'function', name: t.name, description: t.description, parameters: t.input_schema, strict: false }));
 
 // Ausgabe-Elemente so zurückschicken, dass sie ohne serverseitige Speicherung gültig sind
 function toInputItems(output) {
@@ -118,7 +118,7 @@ class ChatGPTAssistant {
           model,
           instructions: instructions(this.tools.cache),
           input: conv.input,
-          tools: FUNCTIONS,
+          tools: functions(),
           parallel_tool_calls: true,
           store: false,
           stream: true,

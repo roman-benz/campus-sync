@@ -1,16 +1,16 @@
 <p align="center"><img src="build/icon.png" width="96" alt="" /></p>
 
-<h1 align="center">Moodle Desktop</h1>
+<h1 align="center">Campus Sync</h1>
 
 <p align="center">Deine Moodle-Kurse als Windows-App: lokal synchronisiert, mit PDF-Viewer, Volltextsuche und einem KI-Lernassistenten (ChatGPT oder Claude).</p>
 
-<p align="center"><a href="https://github.com/roman-benz/moodle-desktop/releases/latest/download/MoodleDesktop-Setup.exe"><b>⬇ Installer für Windows herunterladen</b></a> · <a href="https://github.com/roman-benz/moodle-desktop/releases">Alle Versionen</a></p>
+<p align="center"><a href="https://github.com/roman-benz/campus-sync/releases/latest/download/CampusSync-Setup.exe"><b>⬇ Installer für Windows herunterladen</b></a> · <a href="https://github.com/roman-benz/campus-sync/releases">Alle Versionen</a></p>
 
 ---
 
 ## Funktionen
 
-- **Lokal statt Webseite:** Ein Sync-Dienst lädt im Hintergrund Kurse, Abschnitte, Aufgaben, Textseiten, Forenbeiträge, Termine, Noten und **alle Kursdateien** in einen Ordner (Standard: `Dokumente\Moodle Desktop\<Kurs>\<Abschnitt>\…`). Die Oberfläche liest nur diese lokale Kopie, ist dadurch schnell und funktioniert auch offline.
+- **Lokal statt Webseite:** Ein Sync-Dienst lädt im Hintergrund Kurse, Abschnitte, Aufgaben, Textseiten, Forenbeiträge, Termine, Noten und **alle Kursdateien** in einen Ordner (Standard: `Dokumente\Campus Sync\<Kurs>\<Abschnitt>\…`). Die Oberfläche liest nur diese lokale Kopie, ist dadurch schnell und funktioniert auch offline.
 - **Hintergrundbetrieb:** Startet mit Windows unsichtbar im Infobereich. Synchronisiert im eingestellten Intervall, nach dem Standby und beim Öffnen. Meldet neue Dateien und bald fällige Abgaben als Windows-Benachrichtigung.
 - **Dokumente in der App:** Eingebauter PDF-Viewer (pdf.js) mit Zoom, Seitensprung, markierbarem Text und Suche im Dokument. Word, PowerPoint und Excel erscheinen als Textansicht.
 - **Volltextsuche:** Alle Dokumente werden seitengenau indexiert. Die Suche in der Kopfzeile (Strg+Umschalt+F) findet Stellen in allen Skripten und springt direkt zur Seite.
@@ -22,7 +22,7 @@
 
 ## Installation
 
-1. [`MoodleDesktop-Setup.exe`](https://github.com/roman-benz/moodle-desktop/releases/latest/download/MoodleDesktop-Setup.exe) herunterladen und starten. Es sind keine Administratorrechte nötig.
+1. [`CampusSync-Setup.exe`](https://github.com/roman-benz/campus-sync/releases/latest/download/CampusSync-Setup.exe) herunterladen und starten. Es sind keine Administratorrechte nötig.
 2. Windows SmartScreen warnt beim ersten Start, weil der Installer nicht signiert ist: **„Weitere Informationen“ → „Trotzdem ausführen“**.
 3. Moodle-Adresse eingeben (voreingestellt: DHBW Ravensburg) und mit Kennwort oder über den Browser (SSO) anmelden.
 4. Optional unter **Einstellungen → KI-Assistent** ChatGPT verbinden oder einen Claude-API-Key hinterlegen.
@@ -32,7 +32,9 @@ Voraussetzung: Die Moodle-Seite muss die Schnittstelle der offiziellen Moodle-Ap
 ## Datenschutz
 
 - Gespeichert wird nur ein Zugriffstoken, kein Kennwort, verschlüsselt mit Windows DPAPI. Das gilt ebenso für API-Key und ChatGPT-Tokens.
-- Kursdaten bleiben lokal. Nur Dokumentstellen, die der KI-Assistent für eine Antwort liest, gehen an den gewählten KI-Anbieter.
+- Kursdaten bleiben lokal. Nur Inhalte, die der KI-Assistent für eine Antwort liest, gehen an den gewählten KI-Anbieter. Namen von Forenautoren werden nie übertragen, Noten nur, wenn du das unter **Einstellungen → KI-Assistent** erlaubst.
+- Kursunterlagen sind urheberrechtlich geschützt, und viele Hochschulen untersagen in ihren Moodle-Nutzungsbedingungen die Weitergabe von Inhalten an Dritte. Kläre vor Nutzung des KI-Assistenten, ob deine Hochschule das erlaubt.
+- Das Zugriffstoken wird nur an die eigene Moodle-Seite gesendet. Inhalte, die auf fremde Server verweisen, werden ohne Token geladen oder blockiert.
 
 ## Entwicklung
 
@@ -71,4 +73,6 @@ npm run dist       # Installer lokal nach out/ bauen
 
 ## Lizenz
 
-[MIT](LICENSE) © 2026 Roman Benz. Nicht offiziell mit Moodle™ verbunden.
+[MIT](LICENSE) © 2026 Roman Benz. Bis Version 1.2 hieß die App „Moodle Desktop“; bestehende Installationen übernehmen Anmeldung, Einstellungen und Download-Ordner automatisch.
+
+Campus Sync ist ein unabhängiges Projekt und nicht mit Moodle Pty Ltd verbunden oder von ihr unterstützt. Moodle™ ist eine eingetragene Marke von Moodle Pty Ltd.

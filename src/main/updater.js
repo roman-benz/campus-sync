@@ -1,4 +1,4 @@
-// Automatische Updates aus den GitHub-Releases (github.com/roman-benz/moodle-desktop).
+// Automatische Updates aus den GitHub-Releases (github.com/roman-benz/campus-sync).
 // Updates werden im Hintergrund geladen und still installiert, sobald die App unbemerkt neu
 // starten kann (Fenster versteckt, kein Sync/Chat aktiv) – sonst beim nächsten Beenden.
 const { app } = require('electron');

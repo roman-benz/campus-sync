@@ -1,8 +1,14 @@
 // Gemeinsame Werkzeuge + Anweisungen für beide KI-Anbieter (Claude und ChatGPT).
 // Alle Werkzeuge arbeiten auf der lokalen Kopie (Cache + Volltextindex).
+// Datenschutz: Die Moodle-Nutzungsvereinbarung untersagt, Daten anderer an Dritte weiterzugeben.
+// Deshalb gehen keine Namen anderer Personen (Forenautoren) an den KI-Anbieter, und Noten nur
+// mit ausdrücklicher Zustimmung in den Einstellungen (aiGrades).
 const fs = require('fs');
 const path = require('path');
+const store = require('./store');
 const { stripHtml } = require('./extract');
+
+const gradesAllowed = () => !!store.getSettings().aiGrades;
 
 const IMAGE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
 const MAX_PAGES_PER_READ = 25;
@@ -106,8 +112,13 @@ const TOOL_SPECS = [
   },
 ];
 
+// Werkzeuge, die der KI aktuell angeboten werden
+function toolSpecs() {
+  return gradesAllowed() ? TOOL_SPECS : TOOL_SPECS.filter((t) => t.name !== 'get_grades');
+}
+
 function validateInput(name, input) {
-  const tool = TOOL_SPECS.find((t) => t.name === name);
+  const tool = toolSpecs().find((t) => t.name === name);
   if (!tool) return 'Unbekanntes Werkzeug';
   if (!input || typeof input !== 'object' || Array.isArray(input)) return 'Eingabe ist kein Objekt';
   for (const key of tool.input_schema.required) if (input[key] === undefined) return `Feld "${key}" fehlt`;
@@ -124,8 +135,8 @@ function instructions(cache) {
   const site = cache && cache.site;
   const today = new Date().toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
   return [
-    'Du bist der Lernassistent in „Moodle Desktop“, einer Desktop-App, die die Moodle-Kurse einer/eines Studierenden lokal synchronisiert.',
-    `Nutzer: ${site ? site.fullname : 'unbekannt'} (Moodle: ${site ? site.sitename : '–'}). Heute ist ${today}.`,
+    'Du bist der Lernassistent in „Campus Sync“, einer Desktop-App, die die Moodle-Kurse einer/eines Studierenden lokal synchronisiert.',
+    `Nutzer: ${(site && site.firstname) || 'unbekannt'} (Moodle: ${site ? site.sitename : '–'}). Heute ist ${today}.`,
     '',
     'Deine Hauptaufgabe: die Kursunterlagen durchsuchen, die passenden Stellen finden und verständlich erklären.',
     '- Suche zuerst mit search_documents in den Dokumenten und lies relevante Stellen mit read_pages, bevor du inhaltlich antwortest. Rate nicht, wenn die Unterlagen die Antwort enthalten können.',
@@ -133,7 +144,9 @@ function instructions(cache) {
     '- Belege Aussagen mit Fundstellen und verlinke sie IMMER als Markdown-Link im Format [Dateiname, S. 12](doc://FILE_ID?page=12). Die App öffnet diese Links direkt an der Seite im PDF-Viewer.',
     '- Erkläre didaktisch: erst die Kernidee, dann Details, Formeln mit LaTeX ($…$ bzw. $$…$$), bei Bedarf ein kurzes Beispiel.',
     '- Wenn die Unterlagen etwas nicht abdecken, sag das und ergänze dann mit allgemeinem Fachwissen (klar gekennzeichnet).',
-    '- Für Termine, Abgaben und Noten nutze get_deadlines, read_activity und get_grades.',
+    gradesAllowed()
+      ? '- Für Termine, Abgaben und Noten nutze get_deadlines, read_activity und get_grades.'
+      : '- Für Termine und Abgaben nutze get_deadlines und read_activity. Auf Noten hast du keinen Zugriff; der Nutzer kann ihn unter Einstellungen → KI-Assistent freigeben.',
     '- Bei bewerteten Abgaben: erkläre, gib Hinweise und Feedback; eine fertige Lösung zum Abgeben schreibst du nicht, sondern hilfst Schritt für Schritt.',
     '- Antworte auf Deutsch (außer der Nutzer schreibt anders) und formatiere mit Markdown.',
   ].join('\n');
@@ -322,7 +335,8 @@ class AiTools {
         const p = c.pages[m.id];
         if (p) out.push(stripHtml(p.content));
         const fo = c.forums[m.id];
-        if (fo) for (const d of fo.discussions) out.push(`\n### ${d.subject}\nvon ${d.author}, ${fmtDate(d.created)}\n${stripHtml(d.message)}`);
+        // Ohne Verfassernamen: personenbezogene Daten anderer bleiben lokal
+        if (fo) for (const d of fo.discussions) out.push(`\n### ${d.subject}\n${fmtDate(d.created)}\n${stripHtml(d.message)}`);
         if (!a && !p && !fo) out.push(stripHtml(m.description) || '(Keine Beschreibung. Diese Aktivität ist nur online in Moodle verfügbar.)');
         if (m.url) out.push(`Online: ${m.url}`);
         return out.filter(Boolean).join('\n');
@@ -338,6 +352,7 @@ class AiTools {
       }
 
       case 'get_grades': {
+        if (!gradesAllowed()) throw new Error('Zugriff auf Noten ist in den Einstellungen nicht freigegeben.');
         const g = c.grades[input.course_id];
         if (!g || !g.length) return 'Keine Bewertungen vorhanden.';
         return g
@@ -367,4 +382,4 @@ class AiTools {
   }
 }
 
-module.exports = { AiTools, TOOL_SPECS, validateInput, instructions };
+module.exports = { AiTools, TOOL_SPECS, toolSpecs, validateInput, instructions };

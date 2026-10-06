@@ -1,8 +1,20 @@
 const { app, BrowserWindow, ipcMain, shell, dialog, Tray, Menu, Notification, nativeImage, protocol, nativeTheme, powerMonitor } = require('electron');
 const path = require('path');
+const fs = require('fs');
 // Eigenes Profil (für Tests/Demo); muss vor allem anderen gesetzt werden
 if (process.env.MOODLE_DESKTOP_USERDATA) app.setPath('userData', process.env.MOODLE_DESKTOP_USERDATA);
-const fs = require('fs');
+// Bis 1.2.x hieß die App „Moodle Desktop“: deren Profil (Anmeldung, Einstellungen, Cache) weiterverwenden
+else {
+  const legacy = path.join(app.getPath('appData'), 'Moodle Desktop');
+  const fresh = path.join(app.getPath('appData'), app.getName());
+  if (app.getPath('userData') === fresh && fs.existsSync(legacy)) {
+    app.setPath('userData', legacy);
+    // Electron legt den neuen Ordner schon beim Start leer an – nur dann entfernen, wenn er leer ist
+    try {
+      fs.rmdirSync(fresh);
+    } catch {}
+  }
+}
 const crypto = require('crypto');
 const store = require('./store');
 const { MoodleClient, getPublicConfig, loginWithPassword, loginWithBrowser, normalizeSite } = require('./moodle');
@@ -15,6 +27,8 @@ const { AiTools } = require('./ai-tools');
 const { Updater } = require('./updater');
 
 const ICON = path.join(__dirname, '..', '..', 'build', 'icon.png');
+const APP_NAME = 'Campus Sync';
+// Interne Kennung bleibt trotz Umbenennung gleich (Autostart-Eintrag, Taskleiste, Updates)
 const LOGIN_ITEM = 'de.rbenz.moodledesktop';
 // Versteckt starten: Autostart (--hidden) oder Neustart nach einem stillen Hintergrund-Update
 const HIDDEN_FLAG = store.file('start-hidden');
@@ -68,7 +82,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 600,
     show: false,
-    title: 'Moodle Desktop',
+    title: APP_NAME,
     icon: fs.existsSync(ICON) ? ICON : undefined,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#14161a' : '#f5f7fa',
     autoHideMenuBar: true,
@@ -99,7 +113,7 @@ function createWindow() {
       e.preventDefault();
       win.hide();
       if (!store.getSettings().trayHintShown && Notification.isSupported()) {
-        new Notification({ title: 'Moodle Desktop läuft weiter', body: 'Die Synchronisation läuft im Hintergrund. Über das Tray-Symbol kannst du die App öffnen oder beenden.', icon: ICON }).show();
+        new Notification({ title: `${APP_NAME} läuft weiter`, body: 'Die Synchronisation läuft im Hintergrund. Über das Tray-Symbol kannst du die App öffnen oder beenden.', icon: ICON }).show();
         store.setSettings({ trayHintShown: true });
       }
     }
@@ -119,10 +133,10 @@ function showWindow() {
 function createTray() {
   const img = fs.existsSync(ICON) ? nativeImage.createFromPath(ICON).resize({ width: 16, height: 16 }) : nativeImage.createEmpty();
   tray = new Tray(img);
-  tray.setToolTip(`Moodle Desktop ${app.getVersion()}`);
+  tray.setToolTip(`${APP_NAME} ${app.getVersion()}`);
   const menu = () =>
     Menu.buildFromTemplate([
-      { label: 'Moodle Desktop öffnen', click: showWindow },
+      { label: `${APP_NAME} öffnen`, click: showWindow },
       { label: 'Jetzt synchronisieren', enabled: !!sync.client, click: () => sync.run() },
       { label: 'Download-Ordner öffnen', click: () => shell.openPath(store.getSettings().downloadDir) },
       { type: 'separator' },
@@ -131,7 +145,7 @@ function createTray() {
   tray.setContextMenu(menu());
   tray.on('click', showWindow);
   sync.on('status', (s) => {
-    tray.setToolTip(`Moodle Desktop ${app.getVersion()} – ${s.state === 'idle' ? 'synchronisiert' : s.message}`);
+    tray.setToolTip(`${APP_NAME} ${app.getVersion()} – ${s.state === 'idle' ? 'synchronisiert' : s.message}`);
     tray.setContextMenu(menu());
   });
 }
@@ -139,7 +153,7 @@ function createTray() {
 async function openExternal(url) {
   if (!/^https?:\/\//i.test(url)) return;
   // Moodle-Seiten mit automatischer Anmeldung öffnen (wenn möglich)
-  if (sync.client && url.startsWith(sync.client.siteUrl)) url = await sync.client.autologinUrl(url);
+  if (sync.client && sync.client.isSiteUrl(url)) url = await sync.client.autologinUrl(url);
   shell.openExternal(url);
 }
 
@@ -164,6 +178,9 @@ function startSession() {
 function registerFileProtocol() {
   protocol.handle('mfile', async (req) => {
     const raw = decodeURIComponent(req.url.replace(/^mfile:\/\/file\/?/, ''));
+    // Nur Dateien der eigenen Moodle-Seite laden: eine präparierte Adresse in Kursinhalten
+    // würde sonst das Zugriffstoken an einen fremden Server schicken
+    if (sync.client && !sync.client.isSiteUrl(raw)) return new Response('nicht erlaubt', { status: 403 });
     const dir = store.file(path.join('cache', 'media'));
     const key = path.join(dir, crypto.createHash('sha1').update(raw.split('?')[0]).digest('hex'));
     try {
@@ -181,6 +198,20 @@ function registerFileProtocol() {
       return new Response('nicht verfügbar', { status: 404 });
     }
   });
+}
+
+// Leere Unterordner (und den Ordner selbst, falls dann leer) entfernen
+function removeEmptyDirs(dir) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const e of entries) if (e.isDirectory()) removeEmptyDirs(path.join(dir, e.name));
+  try {
+    if (!fs.readdirSync(dir).length) fs.rmdirSync(dir);
+  } catch {}
 }
 
 // ---------- IPC ----------
@@ -219,11 +250,15 @@ function registerIpc() {
   });
 
   ipcMain.handle('auth:logout', async (_e, { deleteFiles }) => {
-    const dir = store.getSettings().downloadDir;
+    // Nur die synchronisierten Dateien löschen, nie den ganzen Ordner: der Download-Ordner
+    // kann frei gewählt sein (z. B. „Dokumente“) und andere Dateien enthalten.
+    const files = deleteFiles && sync.cache ? Object.values(sync.cache.files).map((f) => f.localPath) : [];
+    const courseDirs = deleteFiles && sync.cache ? sync.cache.courses.map((k) => sync.courseDir(k)) : [];
     sync.detach();
     store.setSecret('moodleToken', null);
     store.setSecret('moodlePrivateToken', null);
-    if (deleteFiles && dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+    for (const f of files) fs.rmSync(f, { force: true });
+    for (const d of courseDirs) removeEmptyDirs(d);
     return true;
   });
 

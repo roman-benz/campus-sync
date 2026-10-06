@@ -1,8 +1,8 @@
 {
   "name": "moodle-desktop",
-  "productName": "Moodle Desktop",
-  "version": "1.2.1",
-  "description": "Moodle Desktop-App mit lokaler Hintergrund-Synchronisation, PDF-Viewer, Volltextsuche und KI-Lernassistent (ChatGPT oder Claude)",
+  "productName": "Campus Sync",
+  "version": "1.3.0",
+  "description": "Desktop-App für Moodle-Kurse mit lokaler Hintergrund-Synchronisation, PDF-Viewer, Volltextsuche und KI-Lernassistent (ChatGPT oder Claude)",
   "main": "src/main/main.js",
   "author": "Roman Benz",
   "license": "MIT",
@@ -30,7 +30,7 @@
   },
   "build": {
     "appId": "de.rbenz.moodledesktop",
-    "productName": "Moodle Desktop",
+    "productName": "Campus Sync",
     "directories": {
       "output": "out",
       "buildResources": "build"
@@ -52,8 +52,8 @@
       "runAfterFinish": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Moodle Desktop",
-      "artifactName": "MoodleDesktop-Setup-${version}.exe",
+      "shortcutName": "Campus Sync",
+      "artifactName": "CampusSync-Setup-${version}.exe",
       "include": "build/installer.nsh",
       "deleteAppDataOnUninstall": false
     },
@@ -61,7 +61,7 @@
       {
         "provider": "github",
         "owner": "roman-benz",
-        "repo": "moodle-desktop",
+        "repo": "campus-sync",
         "releaseType": "release"
       }
     ],
@@ -71,7 +71,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/roman-benz/moodle-desktop.git"
+    "url": "https://github.com/roman-benz/campus-sync.git"
   },
-  "homepage": "https://github.com/roman-benz/moodle-desktop"
+  "homepage": "https://github.com/roman-benz/campus-sync"
 }

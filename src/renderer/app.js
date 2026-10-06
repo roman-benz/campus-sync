@@ -1,4 +1,4 @@
-/* Moodle Desktop – Oberfläche. Liest ausschließlich den lokalen Cache aus dem Hauptprozess. */
+/* Campus Sync – Oberfläche. Liest ausschließlich den lokalen Cache aus dem Hauptprozess. */
 // `api` ist das globale Objekt aus preload.js (contextBridge)
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -265,7 +265,7 @@ function renderLogin() {
       <div class="login-card">
         <div class="login-brand">
           <div class="brand-mark">${icon('graduation')}</div>
-          <div><h1>Moodle Desktop</h1><div class="sub">Deine Kurse lokal – mit KI-Lernassistent</div></div>
+          <div><h1>Campus Sync</h1><div class="sub">Deine Moodle-Kurse lokal – mit KI-Lernassistent</div></div>
         </div>
         ${L.error ? `<div class="error">${esc(L.error)}</div>` : ''}
         ${body}
@@ -343,7 +343,7 @@ function renderNav() {
   const unread = (S.data.notifications || []).filter((n) => !n.read).length + (S.data.newItems || []).length;
   nav.innerHTML = `
     <div class="brand" data-action="go" data-route="dashboard">
-      <div class="brand-mark">${icon('graduation')}</div><b>${esc(site.sitename || 'Moodle Desktop')}</b>
+      <div class="brand-mark">${icon('graduation')}</div><b>${esc(site.sitename || 'Campus Sync')}</b>
     </div>
     <nav class="primary-nav">
       <a href="#" data-action="go" data-route="dashboard" class="${r === 'dashboard' ? 'active' : ''}">Dashboard</a>
@@ -385,7 +385,7 @@ function renderDropdown() {
   if (S.ui.dropdown === 'user') {
     const site = d.site || {};
     return `<div class="dropdown" style="width:290px">
-      <div class="dd-user"><div class="avatar">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</div><div><b>${esc(site.fullname)}</b><small class="muted" style="display:block">${esc(site.sitename)}</small><small class="muted" style="display:block">Moodle Desktop ${esc(S.state.version)}</small></div></div>
+      <div class="dd-user"><div class="avatar">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</div><div><b>${esc(site.fullname)}</b><small class="muted" style="display:block">${esc(site.sitename)}</small><small class="muted" style="display:block">Campus Sync ${esc(S.state.version)}</small></div></div>
       <div class="dd-sep"></div>
       <a class="dd-item" data-action="go" data-route="settings">${icon('settings')}<div>Einstellungen</div></a>
       <a class="dd-item" data-action="open-folder">${icon('folder')}<div>Download-Ordner öffnen</div></a>
@@ -858,6 +858,7 @@ function renderSettings() {
           ${pcard('claude', 'Claude', 'Mit eigenem Anthropic-API-Key', 'sparkles', 'p-claude')}
         </div>
         ${row('Antwortstil', 'Schnell antwortet zügig, Gründlich denkt länger nach (gilt für beide Anbieter)', `<div class="segmented">${EFFORTS.map(([v, l]) => `<button class="${(s.aiEffort || 'balanced') === v ? 'on' : ''}" data-action="set-effort" data-v="${v}">${l}</button>`).join('')}</div>`)}
+        ${row('Zugriff auf Noten', 'Erlaubt der KI, deine Bewertungen und das Feedback dazu zu lesen. Diese Daten werden dann an den gewählten Anbieter übertragen.', sw('aiGrades', s.aiGrades))}
       </div></div>
       <div class="card"><div class="card-head"><h2>${icon('message')} ChatGPT</h2></div><div class="card-body">
         ${g.signedIn ? `
@@ -876,12 +877,12 @@ function renderSettings() {
         </form>
         ${row('Modell', 'Wird für alle neuen Nachrichten verwendet', `<select class="select" style="width:300px" data-change="setting-str" data-key="claudeModel">${models.map(([v, l]) => `<option value="${v}" ${s.claudeModel === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}
       </div></div>
-      <p class="muted small" style="margin:0">Die KI greift nur über die lokale Kopie auf deine Kursdaten zu. Gelesene Dokumentstellen werden für die Antwort an den gewählten Anbieter übertragen.</p>
+      <p class="muted small" style="margin:0">Die KI greift nur über die lokale Kopie auf deine Kursdaten zu. Gelesene Dokumentstellen und Kursinhalte werden für die Antwort an den gewählten Anbieter übertragen, Namen von Forenautoren nie. Kursunterlagen sind urheberrechtlich geschützt, und die Moodle-Nutzungsbedingungen deiner Hochschule können die Weitergabe an Dritte einschränken. Kläre im Zweifel mit deiner Hochschule, ob du die KI-Funktion nutzen darfst.</p>
     </div>`;
   } else if (tab === 'update') {
     const u = S.update || {};
     body = `<div class="card"><div class="card-head"><h2>${icon('download')} Updates</h2></div><div class="card-body">
-      ${row('Installierte Version', 'Moodle Desktop', `<span class="chip info">${esc(S.state.version)}</span>`)}
+      ${row('Installierte Version', 'Campus Sync', `<span class="chip info">${esc(S.state.version)}</span>`)}
       ${row('Status', esc(updateText(u)) + (u.state === 'error' && u.message ? `<br><span class="small muted">${esc(u.message)}</span>` : ''),
         u.state === 'ready' ? '<button class="btn sm primary" data-action="update-install">Neu starten & installieren</button>'
         : `<button class="btn sm" data-action="update-check" ${['dev', 'checking', 'downloading'].includes(u.state) ? 'disabled' : ''}>${icon('refresh', 'sm' + (u.state === 'checking' ? ' spin' : ''))} Nach Updates suchen</button>`)}
@@ -897,7 +898,7 @@ function renderSettings() {
     body = `<div class="card"><div class="card-head"><h2>Konto</h2></div><div class="card-body">
       <div class="dd-user" style="padding:6px 0 14px"><div class="avatar" style="width:52px;height:52px">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</div><div><b style="font-size:16px">${esc(site.fullname)}</b><div class="muted small">${esc(site.sitename)} · ${esc(site.url)}</div><div class="muted small">Moodle ${esc(site.release || '')}</div></div></div>
       ${row('Abmelden', 'Entfernt das Zugriffstoken; lokale Dateien bleiben auf Wunsch erhalten', '<button class="btn sm danger" data-action="logout">Abmelden</button>')}
-      ${row('Version', 'Moodle Desktop', `<span class="muted">${esc(S.state.version)}</span>`)}
+      ${row('Version', 'Campus Sync', `<span class="muted">${esc(S.state.version)}</span>`)}
     </div></div>`;
   }
   return `<div class="page">
@@ -1484,7 +1485,7 @@ function showLimitModal() {
 function showWelcomeModal() {
   showModal(`<div class="cp-logo p-chatgpt" style="width:48px;height:48px;border-radius:14px;margin-bottom:12px">${icon('message')}</div>
     <h3>Du nutzt deinen ChatGPT-Plan</h3>
-    <p>Berechtigte KI-Anfragen in Moodle Desktop nutzen deinen ChatGPT-Plan${S.chatgpt && S.chatgpt.email ? ` (${esc(S.chatgpt.email)})` : ''}. Die Nutzung verwaltest du in deinen ChatGPT-Einstellungen – dort kannst du auch ein Wochenlimit für diese App setzen.</p>
+    <p>Berechtigte KI-Anfragen in Campus Sync nutzen deinen ChatGPT-Plan${S.chatgpt && S.chatgpt.email ? ` (${esc(S.chatgpt.email)})` : ''}. Die Nutzung verwaltest du in deinen ChatGPT-Einstellungen – dort kannst du auch ein Wochenlimit für diese App setzen.</p>
     <div class="row"><button class="btn" data-action="external" data-url="${MANAGE_USAGE_URL}">Nutzung verwalten</button><button class="btn primary" data-action="welcome-ok">Verstanden</button></div>`);
 }
 

@@ -251,6 +251,9 @@ class SyncEngine extends EventEmitter {
         next.notifications = prev.notifications;
       }
 
+      // Während des Abrufs ab- oder neu angemeldet? Dann gehören die Daten zur alten Sitzung.
+      if (this.client !== c) return;
+
       // Dateiindex aufbauen
       next.files = this.buildFileIndex(next, prev);
       const newFiles = firstSync ? [] : Object.values(next.files).filter((f) => !prev.files[f.id]);
@@ -266,12 +269,18 @@ class SyncEngine extends EventEmitter {
       await this.downloadPending();
       this.setStatus({ state: 'idle', message: 'Synchronisiert', done: 0, total: 0 });
     } catch (e) {
+      if (this.client !== c) return;
       this.cache.lastError = e.message;
       const offline = e.cause && /ENOTFOUND|ECONNREFUSED|ETIMEDOUT|fetch failed/i.test(String(e.cause.code || e.message));
       this.setStatus({ state: 'error', message: offline || /fetch failed/.test(e.message) ? 'Offline – zeige lokale Daten' : e.message });
       if (e.code === 'invalidtoken') this.emit('invalidtoken');
     } finally {
       this.running = false;
+      if (this.client !== c) {
+        // Neue Sitzung während dieses Laufs angemeldet – ihr erster Sync wurde übersprungen
+        if (this.client) setImmediate(() => this.run());
+        else this.setStatus({ state: 'idle', message: '', done: 0, total: 0 });
+      }
     }
   }
 
@@ -340,9 +349,11 @@ class SyncEngine extends EventEmitter {
     let done = 0;
     let lastSave = Date.now();
     this.setStatus({ state: 'downloading', message: `Lade ${todo.length} Dateien…`, done: 0, total: todo.length });
+    const client = this.client;
     await pool(todo, 3, async (f) => {
+      if (this.client !== client) return; // abgemeldet: restliche Downloads überspringen
       try {
-        await this.client.download(f.url, f.localPath);
+        await client.download(f.url, f.localPath);
         if (f.timemodified) {
           const t = new Date(f.timemodified * 1000);
           fs.utimesSync(f.localPath, t, t);
@@ -360,6 +371,7 @@ class SyncEngine extends EventEmitter {
         this.emit('files');
       }
     });
+    if (this.client !== client) return;
     this.save();
     this.emit('files');
   }

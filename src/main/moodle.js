@@ -8,6 +8,7 @@ const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
 
 const SERVICE = 'moodle_mobile_app';
+const URL_SCHEME = 'moodlemobile';
 
 function normalizeSite(url) {
   let u = String(url || '').trim();
@@ -56,8 +57,24 @@ class MoodleClient {
     return data;
   }
 
-  // Webservice-Datei-URL mit Token (pluginfile.php → webservice/pluginfile.php)
+  // Gehört die URL zu dieser Moodle-Seite? Reiner Präfixvergleich reicht nicht
+  // (https://moodle.example.de.evil.com beginnt auch mit https://moodle.example.de).
+  isSiteUrl(url) {
+    try {
+      const u = new URL(url);
+      const site = new URL(this.siteUrl);
+      const base = site.pathname.replace(/\/+$/, '');
+      return u.origin === site.origin && (!base || u.pathname === base || u.pathname.startsWith(base + '/'));
+    } catch {
+      return false;
+    }
+  }
+
+  // Webservice-Datei-URL mit Token (pluginfile.php → webservice/pluginfile.php).
+  // Das Token geht nur an pluginfile-Adressen der eigenen Moodle-Seite, nie an fremde Server.
   fileUrl(url) {
+    if (!this.isSiteUrl(url)) throw new MoodleError('Adresse gehört nicht zu dieser Moodle-Seite', 'foreignurl');
+    if (!/\/pluginfile\.php\//.test(url)) return url; // z. B. Theme-Bilder: brauchen kein Token
     let u = url.replace(/\/pluginfile\.php\//, '/webservice/pluginfile.php/');
     u = u.replace('/webservice/webservice/', '/webservice/');
     return u + (u.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(this.token);
@@ -73,9 +90,15 @@ class MoodleClient {
       throw new MoodleError(data.error || data.message || 'Download verweigert', data.errorcode);
     }
     fs.mkdirSync(path.dirname(dest), { recursive: true });
-    const tmp = dest + '.part';
-    await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(tmp));
-    fs.renameSync(tmp, dest);
+    // Eindeutiger Temp-Name: Hintergrund-Download und Öffnen derselben Datei können sich überschneiden
+    const tmp = `${dest}.${crypto.randomBytes(4).toString('hex')}.part`;
+    try {
+      await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(tmp));
+      fs.renameSync(tmp, dest);
+    } catch (e) {
+      fs.rmSync(tmp, { force: true });
+      throw e;
+    }
   }
 
   async fetchBuffer(url) {
@@ -120,11 +143,20 @@ async function loginWithPassword(siteUrl, username, password) {
 }
 
 // SSO-Login (Shibboleth, Microsoft, …): Moodle-Login in eigenem Fenster, danach leitet
-// admin/tool/mobile/launch.php auf <scheme>://token=BASE64 um – diese Umleitung fangen wir ab.
-function loginWithBrowser(siteUrl, parent) {
+// admin/tool/mobile/launch.php auf moodlemobile://token=BASE64 um – diese Umleitung fangen wir ab.
+// Moodle signiert die Antwort mit md5(wwwroot + passport); ohne passende Signatur wird das Token
+// verworfen, damit keine fremde Seite im Anmeldefenster ein eigenes Token unterschieben kann.
+async function loginWithBrowser(siteUrl, parent) {
   const site = normalizeSite(siteUrl);
-  const passport = crypto.randomBytes(8).toString('hex');
-  const launch = `${site}/admin/tool/mobile/launch.php?service=${SERVICE}&passport=${passport}&urlscheme=moodlemobile`;
+  const passport = crypto.randomBytes(16).toString('hex');
+  const launch = `${site}/admin/tool/mobile/launch.php?service=${SERVICE}&passport=${passport}&urlscheme=${URL_SCHEME}`;
+  // Die eingegebene Adresse kann von Moodles wwwroot abweichen (http/https, Schreibweise)
+  const roots = new Set([site]);
+  try {
+    const cfg = await getPublicConfig(site);
+    for (const r of [cfg.wwwroot, cfg.httpswwwroot]) if (r) roots.add(String(r).replace(/\/+$/, ''));
+  } catch {}
+  const valid = new Set([...roots].map((r) => crypto.createHash('md5').update(r + passport).digest('hex')));
 
   return new Promise((resolve, reject) => {
     const ses = session.fromPartition('persist:moodle-login');
@@ -141,18 +173,15 @@ function loginWithBrowser(siteUrl, parent) {
 
     const tryCapture = (event, url) => {
       if (done || !url) return;
-      const m = /^([a-z][a-z0-9+.-]*):\/\/token=([^&#]+)/i.exec(url);
-      if (!m || /^https?$/i.test(m[1])) return;
+      const m = new RegExp(`^${URL_SCHEME}://token=([^&#]+)`, 'i').exec(url);
+      if (!m) return;
       if (event && event.preventDefault) event.preventDefault();
       done = true;
       try {
-        const decoded = Buffer.from(decodeURIComponent(m[2]), 'base64').toString('utf8');
+        const decoded = Buffer.from(decodeURIComponent(m[1]), 'base64').toString('utf8');
         const [signature, token, privateToken] = decoded.split(':::');
-        const expected = crypto.createHash('md5').update(site + passport).digest('hex');
-        if (signature && signature !== expected) {
-          // Manche Seiten nutzen eine abweichende wwwroot-Schreibweise – Token trotzdem akzeptieren.
-          console.warn('SSO-Signatur weicht ab');
-        }
+        if (!signature || !valid.has(signature)) throw new MoodleError('Antwort der Anmeldung ist ungültig (Signatur passt nicht). Bitte erneut versuchen.', 'badsignature');
+        if (!token) throw new MoodleError('Moodle hat kein Zugriffstoken geliefert.', 'notoken');
         resolve({ token, privateToken: privateToken || null });
       } catch (e) {
         reject(e);

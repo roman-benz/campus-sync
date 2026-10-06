@@ -1,12 +1,12 @@
 // Claude-Lernassistent (Anthropic API-Key): Streaming + Werkzeug-Schleife über die lokalen Moodle-Daten.
 const { Anthropic } = require('@anthropic-ai/sdk');
 const store = require('./store');
-const { TOOL_SPECS, validateInput, instructions } = require('./ai-tools');
+const { toolSpecs, validateInput, instructions } = require('./ai-tools');
 
 const FALLBACK_MODELS = new Set(['claude-opus-5', 'claude-fable-5-1']);
 const NO_ADAPTIVE_THINKING = new Set(['claude-haiku-4-5']);
 const EFFORT = { fast: 'low', balanced: 'medium', thorough: 'high' };
-const TOOLS = TOOL_SPECS.map((t) => ({ ...t, eager_input_streaming: true }));
+const tools = () => toolSpecs().map((t) => ({ ...t, eager_input_streaming: true }));
 
 class ClaudeAssistant {
   constructor(tools) {
@@ -58,7 +58,7 @@ class ClaudeAssistant {
         model,
         max_tokens: 64000,
         system: instructions(this.tools.cache),
-        tools: TOOLS,
+        tools: tools(),
         cache_control: { type: 'ephemeral' },
         messages: conv.messages,
       };
