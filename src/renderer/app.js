@@ -923,9 +923,9 @@ const atClock = (dayStart, hm, fallback) => {
 };
 
 // Mensa-Fenster: Pausen zwischen den Vorlesungen (Überschneidungen zusammengefasst) und die
-// Tagesränder. Gültig ist ein Fenster, wenn man innerhalb der Abholzeit abholen kann und ab
-// Abholbeginn noch mindestens minBreak Minuten bis zur nächsten Vorlesung bleiben.
-function mensaBreaks(events, dayStart, minBreak, pickFrom, pickTo) {
+// Tagesränder. Gültig ist ein Fenster, wenn die Pause mindestens minBreak Minuten lang ist,
+// man darin während der Abholzeit abholen kann und ab Abholbeginn noch minEat Minuten zum Essen bleiben.
+function mensaBreaks(events, dayStart, minBreak, pickFrom, pickTo, minEat) {
   const iv = events.map((e) => [e.start, e.end]).sort((x, y) => x[0] - y[0]);
   const merged = [];
   for (const [s0, e0] of iv) {
@@ -937,9 +937,11 @@ function mensaBreaks(events, dayStart, minBreak, pickFrom, pickTo) {
   const out = [];
   const add = (start, end, kind) => {
     const from = Math.max(start, pickFrom); // abholen erst ab Öffnung
-    const usable = end == null ? Infinity : end - from;
-    const reason = from > pickTo ? 'nach der Abholzeit' : end != null && end <= pickFrom ? 'vor der Abholzeit' : usable < need ? 'zu kurz' : '';
-    out.push({ start, end, kind, from, ok: !reason, reason });
+    const len = end == null || kind === 'before' ? Infinity : end - start; // vor der ersten Vorlesung ist der Vormittag frei
+    const eat = end == null ? Infinity : end - from;
+    const reason = from > pickTo ? 'nach der Abholzeit' : end != null && end <= pickFrom ? 'vor der Abholzeit'
+      : len < need ? 'zu kurz' : eat < minEat * 60000 ? `ab Abholbeginn keine ${minEat} Min. zum Essen` : '';
+    out.push({ start, end, kind, from, eat, ok: !reason, reason });
   };
   for (let i = 1; i < merged.length; i++) if (merged[i][0] > merged[i - 1][1]) add(merged[i - 1][1], merged[i][0], 'between');
   if (merged.length) {
@@ -954,9 +956,11 @@ function mensaDayHtml() {
   const t = m.tt;
   const st = S.state.settings;
   const minBreak = Math.max(1, Number(st.mensaMinBreak) || 44);
+  const minEat = Math.max(1, Number(st.mensaMinEat) || 30);
   const controls = `<div class="zu-controls">
       <label title="Abholzeit der Mensa">Abholung <input type="time" class="input" data-change="setting-str" data-key="mensaPickupFrom" value="${esc(st.mensaPickupFrom || '11:45')}" />–<input type="time" class="input" data-change="setting-str" data-key="mensaPickupTo" value="${esc(st.mensaPickupTo || '13:30')}" /></label>
-      <label title="So lang muss die Pause ab Abholbeginn mindestens sein">mind. <input type="number" min="10" max="180" step="1" class="input zu-num" data-change="setting-num" data-key="mensaMinBreak" value="${minBreak}" /> Min.</label>
+      <label title="So lang muss die Pause mindestens sein">Pause mind. <input type="number" min="10" max="180" step="1" class="input zu-num" data-change="setting-num" data-key="mensaMinBreak" value="${minBreak}" /></label>
+      <label title="So viel Zeit muss ab Abholbeginn zum Essen bleiben">Essen mind. <input type="number" min="5" max="120" step="1" class="input zu-num" data-change="setting-num" data-key="mensaMinEat" value="${minEat}" /> Min.</label>
     </div>`;
   const head = (sub) => `<div class="card-head"><h2>${icon('clock')} Zeit für die ZU</h2>${controls}</div><div class="card-body">${sub}`;
   if (!t || t.loading) return `<div class="card zu-card">${head(`<div class="muted small">Lade Stundenplan…</div>`)}</div></div>`;
@@ -967,7 +971,7 @@ function mensaDayHtml() {
   const pickTo = atClock(dayStart, st.mensaPickupTo, '13:30');
   if (!t.events.length) return `<div class="card zu-card">${head(`<div class="zu-free">${icon('checkcircle', 'sm')} Keine Vorlesungen an diesem Tag – Abholung jederzeit zwischen ${ttClock(pickFrom)} und ${ttClock(pickTo)}.</div>`)}</div></div>`;
 
-  const breaks = mensaBreaks(t.events, dayStart, minBreak, pickFrom, pickTo);
+  const breaks = mensaBreaks(t.events, dayStart, minBreak, pickFrom, pickTo, minEat);
   const ok = breaks.filter((x) => x.ok);
   const hourOf = (ms) => (ms - dayStart) / 3600000;
   const from = Math.min(8, Math.floor(hourOf(Math.min(...t.events.map((e) => e.start)))));
@@ -985,15 +989,23 @@ function mensaDayHtml() {
   const nowMark = isToday && Date.now() > dayStart + from * 3600000 && Date.now() < dayStart + to * 3600000 ? `<div class="zu-now" style="left:${pos(Date.now())}%"></div>` : '';
 
   const slot = (x) => {
-    const kind = x.kind === 'before' ? 'vor der ersten Vorlesung' : x.kind === 'after' ? 'nach der letzten Vorlesung' : 'Pause';
-    const wait = x.from > x.start && x.kind === 'between' ? ` · Abholung ab ${ttClock(x.from)}` : '';
-    const time = x.end == null ? `ab ${ttClock(x.from)}` : `${ttClock(x.from)}–${ttClock(x.end)}`;
-    const len = x.end == null ? 'open end' : `${mins(x.from, x.end)} Min.`;
-    return `<div class="zu-slot">${icon('check', 'sm')}<b>${time}</b><span>${len} · ${kind}${wait}</span></div>`;
+    let time;
+    let info;
+    if (x.kind === 'after') {
+      time = `ab ${ttClock(x.start)}`;
+      info = `nach der letzten Vorlesung${x.from > x.start ? ` · Abholung ab ${ttClock(x.from)}` : ''}`;
+    } else if (x.kind === 'before') {
+      time = `bis ${ttClock(x.end)}`;
+      info = `vor der ersten Vorlesung · Abholung ab ${ttClock(x.from)} · ${mins(x.from, x.end)} Min. zum Essen`;
+    } else {
+      time = `${ttClock(x.start)}–${ttClock(x.end)}`;
+      info = `${mins(x.start, x.end)} Min. Pause${x.from > x.start ? ` · Abholung ab ${ttClock(x.from)}` : ''} · ${mins(x.from, x.end)} Min. zum Essen`;
+    }
+    return `<div class="zu-slot">${icon('check', 'sm')}<b>${time}</b><span>${info}</span></div>`;
   };
   const list = ok.length
     ? ok.map(slot).join('')
-    : `<div class="zu-none">${icon('alert', 'sm')} Keine passende Pause: Zwischen ${ttClock(pickFrom)} und ${ttClock(pickTo)} bleiben an diesem Tag nie ${minBreak} Minuten für die ZU.</div>`;
+    : `<div class="zu-none">${icon('alert', 'sm')} Keine passende Pause: An diesem Tag gibt es keine Pause mit mindestens ${minBreak} Minuten, in der man zwischen ${ttClock(pickFrom)} und ${ttClock(pickTo)} abholen kann und danach noch ${minEat} Minuten zum Essen hat.</div>`;
 
   return `<div class="card zu-card">${head(`
       <div class="zu-strip"><div class="zu-track">${band}${gaps}${blocks}${nowMark}</div><div class="zu-ticks">${ticks.join('')}</div></div>
@@ -2351,7 +2363,7 @@ document.addEventListener('change', async (e) => {
   const patch = { [t.dataset.key]: k === 'setting-bool' ? t.checked : k === 'setting-num' ? Number(t.value) : t.value };
   S.state.settings = await api.setSettings(patch);
   if (t.dataset.key === 'claudeModel' || t.dataset.key === 'chatgptModel') renderClaude();
-  if (/^mensa(MinBreak|PickupFrom|PickupTo)$/.test(t.dataset.key) && S.route.name === 'mensa') renderMain();
+  if (/^mensa(MinBreak|MinEat|PickupFrom|PickupTo)$/.test(t.dataset.key) && S.route.name === 'mensa') renderMain();
   toast('Gespeichert');
 });
 
