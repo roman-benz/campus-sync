@@ -25,6 +25,9 @@ const DEFAULTS = {
   mensaUrl: 'https://zuf.my-mensa.de/mensatogo.php?mensa=mensa_fallenbrunnen',
   // So lang muss eine Pause mindestens sein, damit es für einen Mensabesuch reicht
   mensaMinBreak: 44,
+  // Abholzeit der Mensa (Mensa Fallenbrunnen: 11:45–13:30)
+  mensaPickupFrom: '11:45',
+  mensaPickupTo: '13:30',
 };
 
 function file(name) {

@@ -916,67 +916,87 @@ async function loadMensaDay() {
   if (S.route.name === 'mensa') renderMain();
 }
 
-// Pausen zwischen den Vorlesungen (Überschneidungen zusammengefasst) + Tagesränder um die Mittagszeit
-function mensaBreaks(events, dayStart) {
-  const iv = events.map((e) => [e.start, e.end]).sort((a, b) => a[0] - b[0]);
+// Uhrzeit „HH:MM“ an einem Tag → Zeitstempel
+const atClock = (dayStart, hm, fallback) => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || '')) || /^(\d{1,2}):(\d{2})$/.exec(fallback);
+  return dayStart + (Number(m[1]) * 60 + Number(m[2])) * 60000;
+};
+
+// Mensa-Fenster: Pausen zwischen den Vorlesungen (Überschneidungen zusammengefasst) und die
+// Tagesränder. Gültig ist ein Fenster, wenn man innerhalb der Abholzeit abholen kann und ab
+// Abholbeginn noch mindestens minBreak Minuten bis zur nächsten Vorlesung bleiben.
+function mensaBreaks(events, dayStart, minBreak, pickFrom, pickTo) {
+  const iv = events.map((e) => [e.start, e.end]).sort((x, y) => x[0] - y[0]);
   const merged = [];
-  for (const [a, b] of iv) {
+  for (const [s0, e0] of iv) {
     const last = merged[merged.length - 1];
-    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
-    else merged.push([a, b]);
+    if (last && s0 <= last[1]) last[1] = Math.max(last[1], e0);
+    else merged.push([s0, e0]);
   }
-  const at = (h, min = 0) => dayStart + (h * 60 + min) * 60000;
-  const breaks = [];
-  for (let i = 1; i < merged.length; i++) {
-    if (merged[i][0] > merged[i - 1][1]) breaks.push({ start: merged[i - 1][1], end: merged[i][0], kind: 'between' });
-  }
+  const need = minBreak * 60000;
+  const out = [];
+  const add = (start, end, kind) => {
+    const from = Math.max(start, pickFrom); // abholen erst ab Öffnung
+    const usable = end == null ? Infinity : end - from;
+    const reason = from > pickTo ? 'nach der Abholzeit' : end != null && end <= pickFrom ? 'vor der Abholzeit' : usable < need ? 'zu kurz' : '';
+    out.push({ start, end, kind, from, ok: !reason, reason });
+  };
+  for (let i = 1; i < merged.length; i++) if (merged[i][0] > merged[i - 1][1]) add(merged[i - 1][1], merged[i][0], 'between');
   if (merged.length) {
-    // Erste Vorlesung erst nachmittags: vorher ist Zeit (gerechnet ab 11:30)
-    if (merged[0][0] - at(11, 30) > 0) breaks.unshift({ start: at(11, 30), end: merged[0][0], kind: 'before' });
-    // Letzte Vorlesung endet vor 14 Uhr: danach ist Zeit (gerechnet bis 14:00)
-    const lastEnd = merged[merged.length - 1][1];
-    if (at(14) - lastEnd > 0) breaks.push({ start: lastEnd, end: at(14), kind: 'after' });
+    if (merged[0][0] > pickFrom) add(Math.min(pickFrom, merged[0][0]), merged[0][0], 'before');
+    if (merged[merged.length - 1][1] < pickTo) add(merged[merged.length - 1][1], null, 'after');
   }
-  return { merged, breaks };
+  return out.sort((x, y) => x.start - y.start);
 }
 
 function mensaDayHtml() {
   const m = S.mensa;
   const t = m.tt;
-  const minBreak = Math.max(1, Number(S.state.settings.mensaMinBreak) || 44);
-  const minInput = `<label class="zu-min" title="Mindestlänge einer Pause für den Mensabesuch">mind. <input type="number" min="10" max="180" step="1" class="input" data-change="setting-num" data-key="mensaMinBreak" value="${minBreak}" /> Min.</label>`;
-  const head = (sub) => `<div class="card-head"><h2>${icon('clock')} Zeit für die ZU</h2>${minInput}</div><div class="card-body">${sub}`;
+  const st = S.state.settings;
+  const minBreak = Math.max(1, Number(st.mensaMinBreak) || 44);
+  const controls = `<div class="zu-controls">
+      <label title="Abholzeit der Mensa">Abholung <input type="time" class="input" data-change="setting-str" data-key="mensaPickupFrom" value="${esc(st.mensaPickupFrom || '11:45')}" />–<input type="time" class="input" data-change="setting-str" data-key="mensaPickupTo" value="${esc(st.mensaPickupTo || '13:30')}" /></label>
+      <label title="So lang muss die Pause ab Abholbeginn mindestens sein">mind. <input type="number" min="10" max="180" step="1" class="input zu-num" data-change="setting-num" data-key="mensaMinBreak" value="${minBreak}" /> Min.</label>
+    </div>`;
+  const head = (sub) => `<div class="card-head"><h2>${icon('clock')} Zeit für die ZU</h2>${controls}</div><div class="card-body">${sub}`;
   if (!t || t.loading) return `<div class="card zu-card">${head(`<div class="muted small">Lade Stundenplan…</div>`)}</div></div>`;
   if (!t.plan) return `<div class="card zu-card">${head(`<div class="muted small">Kein Stundenplan eingetragen. Füge ihn im Reiter <a href="#" data-action="go" data-route="timetable">Stundenplan</a> hinzu, dann siehst du hier, wann du in die ZU gehen kannst.</div>`)}</div></div>`;
 
   const dayStart = new Date(`${t.date}T00:00:00`).getTime();
-  if (!t.events.length) return `<div class="card zu-card">${head(`<div class="zu-free">${icon('checkcircle', 'sm')} Keine Vorlesungen an diesem Tag – du kannst jederzeit in die ZU.</div>`)}</div></div>`;
+  const pickFrom = atClock(dayStart, st.mensaPickupFrom, '11:45');
+  const pickTo = atClock(dayStart, st.mensaPickupTo, '13:30');
+  if (!t.events.length) return `<div class="card zu-card">${head(`<div class="zu-free">${icon('checkcircle', 'sm')} Keine Vorlesungen an diesem Tag – Abholung jederzeit zwischen ${ttClock(pickFrom)} und ${ttClock(pickTo)}.</div>`)}</div></div>`;
 
-  const { breaks } = mensaBreaks(t.events, dayStart);
-  const ok = breaks.filter((b) => b.end - b.start >= minBreak * 60000);
+  const breaks = mensaBreaks(t.events, dayStart, minBreak, pickFrom, pickTo);
+  const ok = breaks.filter((x) => x.ok);
   const hourOf = (ms) => (ms - dayStart) / 3600000;
   const from = Math.min(8, Math.floor(hourOf(Math.min(...t.events.map((e) => e.start)))));
   const to = Math.max(18, Math.ceil(hourOf(Math.max(...t.events.map((e) => e.end)))));
-  const pos = (ms) => ((hourOf(ms) - from) / (to - from)) * 100;
-  const mins = (b) => Math.round((b.end - b.start) / 60000);
+  const pos = (ms) => Math.max(0, Math.min(100, ((hourOf(ms) - from) / (to - from)) * 100));
+  const mins = (x, y) => Math.round((y - x) / 60000);
+  const endOf = (x) => (x.end == null ? Math.max(pickTo, x.start + minBreak * 60000) : x.end);
 
   const blocks = t.events.map((e) => `<div class="zu-lec" style="left:${pos(e.start)}%;width:${pos(e.end) - pos(e.start)}%" title="${esc(`${e.title}\n${ttClock(e.start)}–${ttClock(e.end)}${e.location ? '\n' + e.location : ''}`)}"><span>${esc(e.title.replace(/\s*\(.*$/, ''))}</span></div>`).join('');
-  const gaps = breaks.map((b) => {
-    const good = mins(b) >= minBreak;
-    return `<div class="zu-gap ${good ? 'ok' : 'short'}" style="left:${pos(b.start)}%;width:${pos(b.end) - pos(b.start)}%" title="${esc(`${ttClock(b.start)}–${ttClock(b.end)} · ${mins(b)} Min.${good ? ' – reicht für die ZU' : ' – zu kurz'}`)}"><span>${mins(b)}′</span></div>`;
-  }).join('');
+  const gaps = breaks.filter((x) => x.kind === 'between').map((x) => `<div class="zu-gap ${x.ok ? 'ok' : 'short'}" style="left:${pos(x.start)}%;width:${pos(x.end) - pos(x.start)}%" title="${esc(`${ttClock(x.start)}–${ttClock(x.end)} · ${mins(x.start, x.end)} Min.${x.ok ? ' – reicht für die ZU' : ' – ' + x.reason}`)}"><span>${mins(x.start, x.end)}′</span></div>`).join('');
+  const band = `<div class="zu-pickup" style="left:${pos(pickFrom)}%;width:${pos(pickTo) - pos(pickFrom)}%" title="Abholzeit ${ttClock(pickFrom)}–${ttClock(pickTo)}"></div>`;
   const ticks = [];
   for (let h = from; h <= to; h += 2) ticks.push(`<span style="left:${pos(dayStart + h * 3600000)}%">${h}</span>`);
   const isToday = t.date === new Date().toLocaleDateString('sv-SE');
   const nowMark = isToday && Date.now() > dayStart + from * 3600000 && Date.now() < dayStart + to * 3600000 ? `<div class="zu-now" style="left:${pos(Date.now())}%"></div>` : '';
 
-  const label = (b) => (b.kind === 'before' ? 'vor der ersten Vorlesung' : b.kind === 'after' ? 'nach der letzten Vorlesung' : 'Pause');
+  const slot = (x) => {
+    const kind = x.kind === 'before' ? 'vor der ersten Vorlesung' : x.kind === 'after' ? 'nach der letzten Vorlesung' : 'Pause';
+    const wait = x.from > x.start && x.kind === 'between' ? ` · Abholung ab ${ttClock(x.from)}` : '';
+    const time = x.end == null ? `ab ${ttClock(x.from)}` : `${ttClock(x.from)}–${ttClock(x.end)}`;
+    const len = x.end == null ? 'open end' : `${mins(x.from, x.end)} Min.`;
+    return `<div class="zu-slot">${icon('check', 'sm')}<b>${time}</b><span>${len} · ${kind}${wait}</span></div>`;
+  };
   const list = ok.length
-    ? ok.map((b) => `<div class="zu-slot">${icon('check', 'sm')}<b>${ttClock(b.start)}–${ttClock(b.end)}</b><span>${mins(b)} Min. · ${label(b)}</span></div>`).join('')
-    : `<div class="zu-none">${icon('alert', 'sm')} Keine Pause mit mindestens ${minBreak} Minuten – an diesem Tag reicht es zwischen den Vorlesungen nicht für die ZU.</div>`;
+    ? ok.map(slot).join('')
+    : `<div class="zu-none">${icon('alert', 'sm')} Keine passende Pause: Zwischen ${ttClock(pickFrom)} und ${ttClock(pickTo)} bleiben an diesem Tag nie ${minBreak} Minuten für die ZU.</div>`;
 
   return `<div class="card zu-card">${head(`
-      <div class="zu-strip"><div class="zu-track">${gaps}${blocks}${nowMark}</div><div class="zu-ticks">${ticks.join('')}</div></div>
+      <div class="zu-strip"><div class="zu-track">${band}${gaps}${blocks}${nowMark}</div><div class="zu-ticks">${ticks.join('')}</div></div>
       <div class="zu-slots">${list}</div>`)}
     </div></div>`;
 }
@@ -2331,7 +2351,7 @@ document.addEventListener('change', async (e) => {
   const patch = { [t.dataset.key]: k === 'setting-bool' ? t.checked : k === 'setting-num' ? Number(t.value) : t.value };
   S.state.settings = await api.setSettings(patch);
   if (t.dataset.key === 'claudeModel' || t.dataset.key === 'chatgptModel') renderClaude();
-  if (t.dataset.key === 'mensaMinBreak' && S.route.name === 'mensa') renderMain();
+  if (/^mensa(MinBreak|PickupFrom|PickupTo)$/.test(t.dataset.key) && S.route.name === 'mensa') renderMain();
   toast('Gespeichert');
 });
 
