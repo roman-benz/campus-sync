@@ -4,7 +4,7 @@
 
 <p align="center">Deine Moodle-Kurse als Windows-App: lokal synchronisiert, mit PDF-Viewer, Volltextsuche und einem KI-Lernassistenten (ChatGPT oder Claude).</p>
 
-<p align="center"><a href="https://github.com/roman-benz/campus-sync/releases/latest/download/Chadoodle-Setup.exe"><b>⬇ Installer für Windows herunterladen</b></a> · <a href="https://github.com/roman-benz/campus-sync/releases">Alle Versionen</a></p>
+<p align="center"><a href="https://github.com/roman-benz/campus-sync/releases/latest/download/Chadoodle-Setup.exe"><b>⬇ Installer für Windows herunterladen</b></a> · <a href="https://chadoodle.romanbenz.com"><b>Im Browser öffnen</b></a> · <a href="https://github.com/roman-benz/campus-sync/releases">Alle Versionen</a></p>
 
 ---
 
@@ -31,6 +31,16 @@
 
 Voraussetzung: Die Moodle-Seite muss die Schnittstelle der offiziellen Moodle-App freigeben. Das ist bei fast allen Hochschulen der Fall.
 
+## Web-Version
+
+Unter **[chadoodle.romanbenz.com](https://chadoodle.romanbenz.com)** läuft dieselbe App im Browser, ohne Installation. Oberfläche und Logik sind identisch mit der Desktop-App; alles läuft lokal im Browser:
+
+- Kursdaten, Dateien, Volltextindex und Einstellungen liegen im Browser-Speicher (IndexedDB) und sind offline verfügbar. Es gibt keinen Server, der deine Daten oder dein Moodle-Token sieht.
+- Synchronisiert wird, solange der Tab offen ist. Benachrichtigungen kommen als Browser-Hinweise.
+- **SSO-Anmeldung:** Moodle öffnet sich in einem neuen Tab. Nach der Anmeldung den Link „App starten“ per Rechtsklick kopieren und in Chadoodle einfügen. Die Anmeldung mit Kennwort funktioniert direkt.
+- Nicht verfügbar: ChatGPT-Anmeldung (sie braucht einen lokalen Rückruf-Server), Download-Ordner, Autostart. Claude mit eigenem API-Key funktioniert.
+- Rapla-Stundenpläne und die Mensa-Bestellung erlauben keine Browser-Zugriffe von fremden Seiten. Diese Anfragen leitet eine kleine Cloudflare Pages Function (`functions/api/proxy.js`) weiter, beschränkt auf my-mensa.de und iCal-Kalender.
+
 ## Datenschutz
 
 - Gespeichert wird nur ein Zugriffstoken, kein Kennwort, verschlüsselt mit Windows DPAPI. Das gilt ebenso für API-Key und ChatGPT-Tokens.
@@ -45,7 +55,10 @@ npm install
 npm start          # App starten
 npm run demo       # Demo mit Beispielkursen (ohne Moodle-Zugang)
 npm run dist       # Installer lokal nach out/ bauen
+npm run web:dev    # Web-Version bauen und unter http://localhost:8788 starten
 ```
+
+Die Web-Version wird bei jedem Push auf `main` automatisch von Cloudflare Pages gebaut (`npm run web:build` → `web/dist`) und unter chadoodle.romanbenz.com veröffentlicht.
 
 ### Neue Version veröffentlichen
 
@@ -72,6 +85,10 @@ npm run dist       # Installer lokal nach out/ bauen
 | `src/main/updater.js` | Automatische Updates (electron-updater, GitHub-Releases) |
 | `src/renderer/*` | Oberfläche (Vanilla JS ohne Build-Schritt) und PDF-Viewer (`viewer.js`) |
 | `build/installer.nsh` | Autostart-Eintrag bei Installation und Deinstallation |
+| `web/backend.js` | Web-Version: ersetzt `main.js` und `preload.js` im Browser |
+| `web/shims/*` | Browser-Ersatz für `fs` (IndexedDB), `electron`, `crypto` und `url` |
+| `web/sw.js`, `web/indexer-worker.js` | Service Worker (Dateien, Moodle-Medien, offline) und Textextraktion im Web Worker |
+| `functions/api/proxy.js` | Pages Function für Rapla und die Mensa-Bestellung |
 
 ## Lizenz
 

@@ -50,6 +50,7 @@ function pdfjsUrl(rel) {
 }
 
 let pdfjsPromise = null;
+let pdfjsLoader = loadPdfjs;
 async function loadPdfjs() {
   const pdfjs = await import(pdfjsUrl('legacy/build/pdf.mjs'));
   // Im Electron-Hintergrundprozess gibt es keine Web-Worker: pdf.js-Worker im selben Prozess laden
@@ -59,7 +60,7 @@ async function loadPdfjs() {
 }
 
 async function pdfPages(file) {
-  pdfjsPromise = pdfjsPromise || loadPdfjs();
+  pdfjsPromise = pdfjsPromise || pdfjsLoader();
   const pdfjs = await pdfjsPromise;
   const data = new Uint8Array(fs.readFileSync(file));
   const task = pdfjs.getDocument({ data, isEvalSupported: false, useSystemFonts: true, verbosity: 0 });
@@ -138,4 +139,10 @@ async function extractPages(file, filename) {
   throw new Error(`Dateiformat ${ext || 'unbekannt'} kann nicht gelesen werden.`);
 }
 
-module.exports = { extractPages, canExtract, stripHtml, TEXT_EXT, OFFICE_EXT };
+// Web-Version: pdf.js wird dort gebündelt statt über Dateipfade geladen
+function setPdfjsLoader(fn) {
+  pdfjsLoader = fn;
+  pdfjsPromise = null;
+}
+
+module.exports = { extractPages, canExtract, stripHtml, setPdfjsLoader, TEXT_EXT, OFFICE_EXT };

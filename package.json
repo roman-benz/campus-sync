@@ -12,7 +12,9 @@
     "icon": "electron scripts/make-icon.js",
     "dist": "electron-builder --win nsis --publish never",
     "demo": "electron scripts/demo.js",
-    "release": "electron-builder --win nsis --publish always"
+    "release": "electron-builder --win nsis --publish always",
+    "web:build": "node web/build.mjs",
+    "web:dev": "node web/build.mjs && node web/dev-server.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
@@ -25,8 +27,12 @@
     "pdfjs-dist": "^6.4.299"
   },
   "devDependencies": {
+    "buffer": "^6.0.3",
     "electron": "^44.5.1",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "events": "^3.3.0",
+    "path-browserify": "^1.0.1"
   },
   "build": {
     "appId": "de.rbenz.moodledesktop",

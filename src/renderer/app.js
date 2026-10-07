@@ -1,6 +1,10 @@
 /* Chadoodle – Oberfläche. Liest ausschließlich den lokalen Cache aus dem Hauptprozess. */
 // `api` ist das globale Objekt aus preload.js (contextBridge)
 const $ = (sel, root = document) => root.querySelector(sel);
+// Web-Version (chadoodle.romanbenz.com): gleiche Oberfläche, aber ohne Download-Ordner, Autostart,
+// Updater und ChatGPT-Anmeldung (die braucht einen lokalen Rückruf-Server)
+const WEB = api.platform === 'web';
+const SHOW_FILE = WEB ? { title: 'Herunterladen', icon: 'download' } : { title: 'Im Ordner zeigen', icon: 'folder' };
 
 const S = {
   state: null,
@@ -315,7 +319,7 @@ function renderLogin() {
         </div>
         ${L.error ? `<div class="error">${esc(L.error)}</div>` : ''}
         ${body}
-        <div class="login-foot">Die App lädt deine Kursinhalte im Hintergrund herunter. Dein Kennwort wird nicht gespeichert, nur ein verschlüsseltes Zugriffstoken.</div>
+        <div class="login-foot">${WEB ? 'Chadoodle lädt deine Kursinhalte in diesen Browser. Dein Kennwort wird nicht gespeichert, nur ein Zugriffstoken – und das verlässt deinen Browser nur Richtung Moodle.' : 'Die App lädt deine Kursinhalte im Hintergrund herunter. Dein Kennwort wird nicht gespeichert, nur ein verschlüsseltes Zugriffstoken.'}</div>
       </div>
     </div>`;
 }
@@ -692,7 +696,7 @@ function fileLine(f, sub = '') {
     <div class="grow">${esc(f.filename)}${sub ? ` <span class="muted small">· ${esc(sub)}</span>` : ''}</div>
     <span class="muted small">${fmtSize(f.filesize)}</span>${st}
     <button class="icon-btn sm claude-mini" data-action="ask-file" data-file="${f.id}" title="Mit KI besprechen">${icon('sparkles', 'sm')}</button>
-    <button class="icon-btn sm" data-action="show-file" data-file="${f.id}" title="Im Ordner zeigen">${icon('folder', 'sm')}</button>
+    <button class="icon-btn sm" data-action="show-file" data-file="${f.id}" title="${SHOW_FILE.title}">${icon(SHOW_FILE.icon, 'sm')}</button>
   </div>`;
 }
 
@@ -780,7 +784,7 @@ function renderCourse() {
       <div class="card"><table class="table"><thead><tr><th>Name</th><th>Abschnitt</th><th>Größe</th><th>Geändert</th><th></th></tr></thead><tbody>
       ${list.map((f) => `<tr><td><a href="#" data-action="open-file" data-file="${f.id}">${esc(f.filename)}</a><div class="muted small">${esc(f.moduleName)}</div></td><td class="muted small">${esc(f.section.replace(/^\d+ /, ''))}</td><td class="small">${fmtSize(f.filesize)}</td><td class="small">${fmtDate(f.timemodified)}</td>
         <td style="white-space:nowrap;text-align:right">${f.downloaded ? `<span class="chip ok">${icon('check', 'sm')} lokal</span>` : f.error ? `<span class="chip warn" title="${esc(f.error)}">Fehler</span>` : '<span class="chip">online</span>'}
-        <button class="icon-btn sm claude-mini" data-action="ask-file" data-file="${f.id}" title="Mit KI besprechen">${icon('sparkles', 'sm')}</button><button class="icon-btn sm" data-action="show-file" data-file="${f.id}" title="Im Ordner zeigen">${icon('folder', 'sm')}</button></td></tr>`).join('')}
+        <button class="icon-btn sm claude-mini" data-action="ask-file" data-file="${f.id}" title="Mit KI besprechen">${icon('sparkles', 'sm')}</button><button class="icon-btn sm" data-action="show-file" data-file="${f.id}" title="${SHOW_FILE.title}">${icon(SHOW_FILE.icon, 'sm')}</button></td></tr>`).join('')}
       </tbody></table>${!list.length ? `<div class="empty">${icon('folder')}<div>Keine Dateien</div></div>` : ''}</div>`;
   }
 
@@ -848,7 +852,7 @@ function activityHtml(m) {
       </div>
       <div class="actions">
         ${files.length || ['page', 'assign', 'forum'].includes(m.modname) ? `<button class="icon-btn sm claude-mini" data-action="${files.length === 1 ? 'ask-file' : 'ask-module'}" data-file="${files[0] ? files[0].id : ''}" data-cmid="${m.id}" title="Mit KI besprechen">${icon('sparkles', 'sm')}</button>` : ''}
-        ${files.length === 1 ? `<button class="icon-btn sm" data-action="show-file" data-file="${files[0].id}" title="Im Ordner zeigen">${icon('folder', 'sm')}</button>` : ''}
+        ${files.length === 1 ? `<button class="icon-btn sm" data-action="show-file" data-file="${files[0].id}" title="${SHOW_FILE.title}">${icon(SHOW_FILE.icon, 'sm')}</button>` : ''}
         ${m.url ? `<button class="icon-btn sm" data-action="external" data-url="${esc(m.url)}" title="In Moodle öffnen">${icon('external', 'sm')}</button>` : ''}
       </div>
       ${state}
@@ -1536,17 +1540,17 @@ function renderSettings() {
   const tab = S.ui.settingsTab;
   const sw = (key, on) => `<label class="switch"><input type="checkbox" data-change="setting-bool" data-key="${key}" ${on ? 'checked' : ''} /><span></span></label>`;
   const row = (title, sub, ctl) => `<div class="setting-row"><div class="txt"><b>${title}</b><small>${sub}</small></div><div class="ctl">${ctl}</div></div>`;
-  const tabs = [['sync', 'Synchronisation', 'refresh'], ['ai', 'KI-Assistent', 'sparkles'], ['look', 'Darstellung', 'moon'], ['update', 'Updates', 'download'], ['account', 'Konto', 'user']];
+  const tabs = [['sync', 'Synchronisation', 'refresh'], ['ai', 'KI-Assistent', 'sparkles'], ['look', 'Darstellung', 'moon'], ['update', 'Updates', 'download'], ['account', 'Konto', 'user']].filter(([v]) => !WEB || v !== 'update');
   let body = '';
   if (tab === 'sync') {
     body = `<div class="card"><div class="card-head"><h2>Synchronisation & Downloads</h2></div><div class="card-body">
-      ${row('Download-Ordner', `<span class="path-box" title="${esc(s.downloadDir)}">${esc(s.downloadDir)}</span>`, `<button class="btn sm" data-action="pick-folder">Ändern</button><button class="btn sm ghost" data-action="open-folder">${icon('folder', 'sm')}</button>`)}
+      ${WEB ? '' : row('Download-Ordner', `<span class="path-box" title="${esc(s.downloadDir)}">${esc(s.downloadDir)}</span>`, `<button class="btn sm" data-action="pick-folder">Ändern</button><button class="btn sm ghost" data-action="open-folder">${icon('folder', 'sm')}</button>`)}
       ${row('Sync-Intervall', 'Wie oft im Hintergrund nach neuen Inhalten gesucht wird', `<select class="select" style="width:150px" data-change="setting-num" data-key="syncIntervalMin">${[10, 15, 30, 60, 120, 240].map((v) => `<option value="${v}" ${s.syncIntervalMin == v ? 'selected' : ''}>alle ${v < 60 ? v + ' Min.' : v / 60 + ' Std.'}</option>`).join('')}</select>`)}
-      ${row('Dateien automatisch herunterladen', 'Alle Kursdateien werden lokal gespeichert und sind offline verfügbar', sw('autoDownload', s.autoDownload))}
+      ${row('Dateien automatisch herunterladen', WEB ? 'Alle Kursdateien werden in diesem Browser gespeichert und sind offline verfügbar' : 'Alle Kursdateien werden lokal gespeichert und sind offline verfügbar', sw('autoDownload', s.autoDownload))}
       ${row('Maximale Dateigröße', 'Größere Dateien werden erst beim Öffnen geladen', `<select class="select" style="width:150px" data-change="setting-num" data-key="maxFileSizeMB">${[[25, '25 MB'], [50, '50 MB'], [100, '100 MB'], [200, '200 MB'], [500, '500 MB'], [100000, 'unbegrenzt']].map(([v, l]) => `<option value="${v}" ${s.maxFileSizeMB == v ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}
-      ${row('Benachrichtigungen', 'Windows-Hinweise bei neuen Dateien und bald fälligen Abgaben', sw('notifications', s.notifications))}
-      ${row('Im Hintergrund weiterlaufen', 'Beim Schließen des Fensters in den Infobereich minimieren', sw('runInBackground', s.runInBackground))}
-      ${row('Mit Windows starten', 'Startet unsichtbar im Infobereich und synchronisiert automatisch', sw('startWithWindows', s.startWithWindows))}
+      ${row('Benachrichtigungen', WEB ? 'Browser-Hinweise bei neuen Dateien und bald fälligen Abgaben (solange der Tab geöffnet ist)' : 'Windows-Hinweise bei neuen Dateien und bald fälligen Abgaben', sw('notifications', s.notifications))}
+      ${WEB ? '' : row('Im Hintergrund weiterlaufen', 'Beim Schließen des Fensters in den Infobereich minimieren', sw('runInBackground', s.runInBackground))}
+      ${WEB ? '' : row('Mit Windows starten', 'Startet unsichtbar im Infobereich und synchronisiert automatisch', sw('startWithWindows', s.startWithWindows))}
     </div></div>`;
   } else if (tab === 'ai') {
     const models = CLAUDE_MODELS;
@@ -1557,13 +1561,13 @@ function renderSettings() {
       <div class="card"><div class="card-head"><h2>${icon('sparkles')} KI-Assistent</h2></div><div class="card-body">
         <p class="muted small" style="margin:0 0 12px">Der Assistent durchsucht deine synchronisierten Unterlagen, findet die passenden Stellen und erklärt sie. Er kennt außerdem Stundenplan und Speiseplan und kann Essen für dich bestellen – verbindlich erst, wenn du im Bestätigungsdialog zustimmst. Wähle, womit er arbeitet:</p>
         <div class="prov-grid">
-          ${pcard('chatgpt', 'ChatGPT', 'Mit deinem Plus-/Pro-Plan – ohne API-Key', 'message', 'p-chatgpt')}
+          ${WEB ? '' : pcard('chatgpt', 'ChatGPT', 'Mit deinem Plus-/Pro-Plan – ohne API-Key', 'message', 'p-chatgpt')}
           ${pcard('claude', 'Claude', 'Mit eigenem Anthropic-API-Key', 'sparkles', 'p-claude')}
         </div>
         ${row('Antwortstil', 'Schnell antwortet zügig, Gründlich denkt länger nach (gilt für beide Anbieter)', `<div class="segmented">${EFFORTS.map(([v, l]) => `<button class="${(s.aiEffort || 'balanced') === v ? 'on' : ''}" data-action="set-effort" data-v="${v}">${l}</button>`).join('')}</div>`)}
         ${row('Zugriff auf Noten', 'Erlaubt der KI, deine Bewertungen und das Feedback dazu zu lesen. Diese Daten werden dann an den gewählten Anbieter übertragen.', sw('aiGrades', s.aiGrades))}
       </div></div>
-      <div class="card"><div class="card-head"><h2>${icon('message')} ChatGPT</h2></div><div class="card-body">
+      ${WEB ? '' : `<div class="card"><div class="card-head"><h2>${icon('message')} ChatGPT</h2></div><div class="card-body">
         ${g.signedIn ? `
           ${row('Verbunden', `${esc(g.email || g.name || 'ChatGPT-Konto')} ${g.planUsage ? '<span class="chip ok">Plan-Nutzung aktiv</span>' : '<span class="chip warn">Plan-Nutzung nicht freigegeben</span>'}<br>Du bleibst angemeldet – die App erneuert die Anmeldung automatisch.`, `<button class="btn sm" data-action="external" data-url="${MANAGE_USAGE_URL}">Nutzung verwalten</button><button class="btn sm ghost" data-action="chatgpt-logout">Abmelden</button>`)}
           ${row('Modell', 'Modelle, die dein ChatGPT-Plan für Apps freigibt', S.gptModels && S.gptModels.length ? `<select class="select" style="width:260px" data-change="setting-str" data-key="chatgptModel">${S.gptModels.map((m) => `<option value="${esc(m.id)}" ${gptSelectedModel() === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>` : `<button class="btn sm" data-action="chatgpt-models">${icon('refresh', 'sm')} Modelle laden</button>`)}
@@ -1573,10 +1577,10 @@ function renderSettings() {
           ${row('Nicht verbunden', 'Für ChatGPT Plus und Pro. Anfragen zählen zu deinem ChatGPT-Plan; ein wöchentliches Limit für diese App legst du in den ChatGPT-Einstellungen fest.', S.gptLogin ? '<button class="btn sm" data-action="chatgpt-cancel">Abbrechen</button>' : '<button class="btn sm chatgpt" data-action="chatgpt-login">Continue with ChatGPT</button>')}
           ${row('Protokoll', 'Bei Anmeldeproblemen: technisches Protokoll (ohne Passwörter/Tokens)', '<button class="btn sm ghost" data-action="chatgpt-log">Protokoll öffnen</button>')}
         `}
-      </div></div>
+      </div></div>`}
       <div class="card"><div class="card-head"><h2>${icon('sparkles')} Claude</h2></div><div class="card-body">
         <form data-submit="claude-key">
-          ${row('API-Key', S.state.hasClaudeKey ? '<span class="chip ok">Hinterlegt</span> Wird verschlüsselt gespeichert (Windows DPAPI)' : 'Erstelle einen Key unter console.anthropic.com → API Keys', `<input id="claude-key-input" type="password" class="input" style="width:240px" placeholder="sk-ant-…" /><button class="btn sm primary">Speichern</button>${S.state.hasClaudeKey ? '<button type="button" class="btn sm ghost danger" data-action="remove-key">Entfernen</button>' : ''}`)}
+          ${row('API-Key', S.state.hasClaudeKey ? `<span class="chip ok">Hinterlegt</span> ${WEB ? 'Wird nur in diesem Browser gespeichert' : 'Wird verschlüsselt gespeichert (Windows DPAPI)'}` : 'Erstelle einen Key unter console.anthropic.com → API Keys', `<input id="claude-key-input" type="password" class="input" style="width:240px" placeholder="sk-ant-…" /><button class="btn sm primary">Speichern</button>${S.state.hasClaudeKey ? '<button type="button" class="btn sm ghost danger" data-action="remove-key">Entfernen</button>' : ''}`)}
         </form>
         ${row('Modell', 'Wird für alle neuen Nachrichten verwendet', `<select class="select" style="width:300px" data-change="setting-str" data-key="claudeModel">${models.map(([v, l]) => `<option value="${v}" ${s.claudeModel === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}
       </div></div>
@@ -1594,7 +1598,7 @@ function renderSettings() {
     </div></div>`;
   } else if (tab === 'look') {
     body = `<div class="card"><div class="card-head"><h2>Darstellung</h2></div><div class="card-body">
-      ${row('Farbschema', 'Hell, dunkel oder wie Windows', `<div class="segmented">${[['system', 'System'], ['light', 'Hell'], ['dark', 'Dunkel']].map(([v, l]) => `<button class="${s.theme === v ? 'on' : ''}" data-action="set-theme" data-v="${v}">${l}</button>`).join('')}</div>`)}
+      ${row('Farbschema', WEB ? 'Hell, dunkel oder wie das System' : 'Hell, dunkel oder wie Windows', `<div class="segmented">${[['system', 'System'], ['light', 'Hell'], ['dark', 'Dunkel']].map(([v, l]) => `<button class="${s.theme === v ? 'on' : ''}" data-action="set-theme" data-v="${v}">${l}</button>`).join('')}</div>`)}
     </div></div>`;
   } else {
     const site = S.data.site || {};
@@ -1656,8 +1660,8 @@ function renderViewer() {
       <div class="vb-group">
         <button class="btn sm claude" data-action="viewer-ask" data-mode="page" title="Aktuelle Seite erklären lassen">${icon('sparkles', 'sm')} Seite erklären</button>
         <button class="icon-btn sm" data-action="viewer-ask" data-mode="summary" title="Dokument zusammenfassen">${icon('list', 'sm')}</button>
-        <button class="icon-btn sm" data-action="show-file" data-file="${f.id}" title="Im Ordner zeigen">${icon('folder', 'sm')}</button>
-        <button class="icon-btn sm" data-action="open-file-external" data-file="${f.id}" title="Mit Standard-App öffnen">${icon('external', 'sm')}</button>
+        <button class="icon-btn sm" data-action="show-file" data-file="${f.id}" title="${SHOW_FILE.title}">${icon(SHOW_FILE.icon, 'sm')}</button>
+        <button class="icon-btn sm" data-action="open-file-external" data-file="${f.id}" title="${WEB ? 'In neuem Tab öffnen' : 'Mit Standard-App öffnen'}">${icon('external', 'sm')}</button>
       </div>
     </div>
     <div class="viewer-body">
@@ -1901,7 +1905,7 @@ const PROVIDERS = {
   claude: { name: 'Claude', icon: 'sparkles', cls: 'p-claude' },
   chatgpt: { name: 'ChatGPT', icon: 'message', cls: 'p-chatgpt' },
 };
-const prov = () => (S.state && S.state.settings.aiProvider) || 'claude';
+const prov = () => (WEB ? 'claude' : (S.state && S.state.settings.aiProvider) || 'claude');
 const MANAGE_USAGE_URL = 'https://chatgpt.com/settings/usage';
 
 function providerReady(p = prov()) {
@@ -1943,7 +1947,7 @@ function renderClaude() {
     <div class="cp-head">
       <div class="cp-logo ${p.cls}">${icon(p.icon)}</div>
       <div class="grow"><b>Lernassistent</b><small>${esc(p.name)} · ${esc(providerModelLabel())}</small></div>
-      <div class="segmented sm-seg">${Object.entries(PROVIDERS).map(([k, v]) => `<button class="${prov() === k ? 'on' : ''}" data-action="set-provider" data-v="${k}" title="${v.name} verwenden">${v.name}</button>`).join('')}</div>
+      <div class="segmented sm-seg">${Object.entries(PROVIDERS).filter(([k]) => !WEB || k === 'claude').map(([k, v]) => `<button class="${prov() === k ? 'on' : ''}" data-action="set-provider" data-v="${k}" title="${v.name} verwenden">${v.name}</button>`).join('')}</div>
       <button class="icon-btn sm" data-action="chat-new" title="Neuer Chat">${icon('plus')}</button>
       <button class="icon-btn sm" data-action="toggle-claude" title="Schließen">${icon('x')}</button>
     </div>
@@ -1971,7 +1975,7 @@ function setupCard() {
   return `<div class="key-card"><h3>${icon('key', 'sm')} Claude einrichten</h3>
     <p>Hinterlege deinen Anthropic-API-Key, um mit Claude über deine Kursmaterialien zu sprechen. Den Key erstellst du unter console.anthropic.com.</p>
     <form data-submit="claude-key"><input id="claude-key-input" type="password" class="input" placeholder="sk-ant-…" style="margin-bottom:10px" /><button class="btn claude block">Speichern</button></form>
-    <p class="small muted" style="margin:10px 0 0">Oder nutze <a href="#" data-action="set-provider" data-v="chatgpt">deinen ChatGPT-Plan</a>.</p></div>`;
+    ${WEB ? '' : '<p class="small muted" style="margin:10px 0 0">Oder nutze <a href="#" data-action="set-provider" data-v="chatgpt">deinen ChatGPT-Plan</a>.</p>'}</div>`;
 }
 
 function renderChatBody() {
@@ -2618,6 +2622,7 @@ document.addEventListener('click', (e) => {
     }
     if (/^https?:/i.test(href)) api.openExternal(href);
     else if (href.startsWith('mfile://file/')) api.openExternal(decodeURIComponent(href.slice('mfile://file/'.length)));
+    else if (href.startsWith('/mfile/')) api.openExternal(decodeURIComponent(href.slice('/mfile/'.length)));
     return;
   }
   if (S.ui.dropdown && !e.target.closest('.dropdown')) { S.ui.dropdown = null; renderNav(); }

@@ -32,11 +32,13 @@ async function pool(items, limit, fn) {
 }
 
 // pluginfile-Links in HTML auf das lokale mfile://-Protokoll umbiegen (Token bleibt im Hauptprozess).
+// Die Web-Version setzt hier ihren Service-Worker-Pfad ein.
+const media = { prefix: 'mfile://file/' };
 function rewriteHtml(html, siteUrl) {
   if (!html) return html;
   const esc = siteUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`${esc}/(?:webservice/)?pluginfile\\.php/[^"'\\s<>)]+`, 'g');
-  return html.replace(re, (u) => 'mfile://file/' + encodeURIComponent(u.replace(/&amp;/g, '&')));
+  return html.replace(re, (u) => media.prefix + encodeURIComponent(u.replace(/&amp;/g, '&')));
 }
 
 class SyncEngine extends EventEmitter {
@@ -433,4 +435,4 @@ class SyncEngine extends EventEmitter {
   }
 }
 
-module.exports = { SyncEngine, safeName };
+module.exports = { SyncEngine, safeName, media };

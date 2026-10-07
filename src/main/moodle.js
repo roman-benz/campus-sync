@@ -146,10 +146,11 @@ async function loginWithPassword(siteUrl, username, password) {
 // admin/tool/mobile/launch.php auf moodlemobile://token=BASE64 um – diese Umleitung fangen wir ab.
 // Moodle signiert die Antwort mit md5(wwwroot + passport); ohne passende Signatur wird das Token
 // verworfen, damit keine fremde Seite im Anmeldefenster ein eigenes Token unterschieben kann.
-async function loginWithBrowser(siteUrl, parent) {
+// Start der Browser-Anmeldung: Adresse von launch.php und die gültigen Signaturen der Antwort
+async function prepareBrowserLogin(siteUrl, extra = '') {
   const site = normalizeSite(siteUrl);
   const passport = crypto.randomBytes(16).toString('hex');
-  const launch = `${site}/admin/tool/mobile/launch.php?service=${SERVICE}&passport=${passport}&urlscheme=${URL_SCHEME}`;
+  const launch = `${site}/admin/tool/mobile/launch.php?service=${SERVICE}&passport=${passport}&urlscheme=${URL_SCHEME}${extra}`;
   // Die eingegebene Adresse kann von Moodles wwwroot abweichen (http/https, Schreibweise)
   const roots = new Set([site]);
   try {
@@ -157,6 +158,22 @@ async function loginWithBrowser(siteUrl, parent) {
     for (const r of [cfg.wwwroot, cfg.httpswwwroot]) if (r) roots.add(String(r).replace(/\/+$/, ''));
   } catch {}
   const valid = new Set([...roots].map((r) => crypto.createHash('md5').update(r + passport).digest('hex')));
+  return { launch, valid };
+}
+
+// moodlemobile://token=BASE64 → { token, privateToken }; null, wenn die Adresse kein Token enthält
+function parseLaunchToken(url, valid) {
+  const m = new RegExp(`^${URL_SCHEME}://token=([^&#]+)`, 'i').exec(String(url || '').trim());
+  if (!m) return null;
+  const decoded = Buffer.from(decodeURIComponent(m[1]), 'base64').toString('utf8');
+  const [signature, token, privateToken] = decoded.split(':::');
+  if (!signature || !valid.has(signature)) throw new MoodleError('Antwort der Anmeldung ist ungültig (Signatur passt nicht). Bitte erneut versuchen.', 'badsignature');
+  if (!token) throw new MoodleError('Moodle hat kein Zugriffstoken geliefert.', 'notoken');
+  return { token, privateToken: privateToken || null };
+}
+
+async function loginWithBrowser(siteUrl, parent) {
+  const { launch, valid } = await prepareBrowserLogin(siteUrl);
 
   return new Promise((resolve, reject) => {
     const ses = session.fromPartition('persist:moodle-login');
@@ -173,16 +190,11 @@ async function loginWithBrowser(siteUrl, parent) {
 
     const tryCapture = (event, url) => {
       if (done || !url) return;
-      const m = new RegExp(`^${URL_SCHEME}://token=([^&#]+)`, 'i').exec(url);
-      if (!m) return;
+      if (!new RegExp(`^${URL_SCHEME}://token=`, 'i').test(url)) return;
       if (event && event.preventDefault) event.preventDefault();
       done = true;
       try {
-        const decoded = Buffer.from(decodeURIComponent(m[1]), 'base64').toString('utf8');
-        const [signature, token, privateToken] = decoded.split(':::');
-        if (!signature || !valid.has(signature)) throw new MoodleError('Antwort der Anmeldung ist ungültig (Signatur passt nicht). Bitte erneut versuchen.', 'badsignature');
-        if (!token) throw new MoodleError('Moodle hat kein Zugriffstoken geliefert.', 'notoken');
-        resolve({ token, privateToken: privateToken || null });
+        resolve(parseLaunchToken(url, valid));
       } catch (e) {
         reject(e);
       }
@@ -204,4 +216,4 @@ async function loginWithBrowser(siteUrl, parent) {
   });
 }
 
-module.exports = { MoodleClient, MoodleError, getPublicConfig, loginWithPassword, loginWithBrowser, normalizeSite };
+module.exports = { MoodleClient, MoodleError, getPublicConfig, loginWithPassword, loginWithBrowser, prepareBrowserLogin, parseLaunchToken, normalizeSite };

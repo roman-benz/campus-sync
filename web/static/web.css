@@ -1,0 +1,3 @@
+/* Nur Web-Version: Funktionen ohne Gegenstück im Browser ausblenden */
+html.web [data-action="open-folder"],
+html.web [data-action="pick-folder"] { display: none !important; }
