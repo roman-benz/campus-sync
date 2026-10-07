@@ -1619,6 +1619,7 @@ function renderSettings() {
     body = `<div class="card"><div class="card-head"><h2>Konto</h2></div><div class="card-body">
       <div class="dd-user" style="padding:6px 0 14px"><div class="avatar" style="width:52px;height:52px">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</div><div><b style="font-size:16px">${esc(site.fullname)}</b><div class="muted small">${esc(site.sitename)} · ${esc(site.url)}</div><div class="muted small">Moodle ${esc(site.release || '')}</div></div></div>
       ${row('Abmelden', 'Entfernt das Zugriffstoken; lokale Dateien bleiben auf Wunsch erhalten', '<button class="btn sm danger" data-action="logout">Abmelden</button>')}
+      ${WEB ? row('Web-Zugang', 'Meldet diesen Browser von chadoodle.romanbenz.com ab (deine Daten hier bleiben erhalten)', '<button class="btn sm ghost" data-action="gate-logout">Abmelden</button>') : ''}
       ${row('Version', 'Chadoodle', `<span class="muted">${esc(S.state.version)}</span>`)}
     </div></div>
     ${accountCard(row, sw)}`;
@@ -2484,6 +2485,7 @@ const actions = {
     applyTheme(el.dataset.v);
     renderMain();
   },
+  'gate-logout': () => api.gateLogout(),
   'account-connect': () => accountRun(() => api.accountConnect(), 'Mit dem Chadoodle-Konto verbunden'),
   'account-sync': () => accountRun(() => api.accountSync()),
   'account-disconnect': () => accountRun(() => api.accountDisconnect(), 'Dieses Gerät gleicht nicht mehr ab'),

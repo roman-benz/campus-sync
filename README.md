@@ -36,6 +36,8 @@ Voraussetzung: Die Moodle-Seite muss die Schnittstelle der offiziellen Moodle-Ap
 
 Unter **[chadoodle.romanbenz.com](https://chadoodle.romanbenz.com)** läuft dieselbe App im Browser, ohne Installation. Oberfläche und Logik sind identisch mit der Desktop-App; alles läuft lokal im Browser:
 
+- **Zugang derzeit nur für freigeschaltete Konten:** Vor der Seite steht ein Login (Supabase Auth, E-Mail und Passwort). Freigeschaltet wird über die Tabelle `web_access_emails` im Supabase-Projekt. Die Pages-Middleware (`functions/_middleware.js`) lässt ohne gültiges Zugangs-Cookie nichts von der App durch.
+
 - Kursdaten, Dateien, Volltextindex und Einstellungen liegen im Browser-Speicher (IndexedDB) und sind offline verfügbar. Es gibt keinen Server, der deine Daten oder dein Moodle-Token sieht.
 - Synchronisiert wird, solange der Tab offen ist. Benachrichtigungen kommen als Browser-Hinweise.
 - **SSO-Anmeldung:** Moodle öffnet sich in einem neuen Tab. Nach der Anmeldung den Link „App starten“ per Rechtsklick kopieren und in Chadoodle einfügen. Die Anmeldung mit Kennwort funktioniert direkt.
@@ -92,6 +94,7 @@ Die Web-Version wird bei jedem Push auf `main` automatisch von Cloudflare Pages 
 | `web/shims/*` | Browser-Ersatz für `fs` (IndexedDB), `electron`, `crypto` und `url` |
 | `web/sw.js`, `web/indexer-worker.js` | Service Worker (Dateien, Moodle-Medien, offline) und Textextraktion im Web Worker |
 | `functions/api/proxy.js` | Pages Function für Rapla und die Mensa-Bestellung |
+| `functions/_middleware.js`, `functions/api/gate.js`, `functions/_gate/*` | Zugangsschutz der Website: Login-Seite, Prüfung der Freigabe, signiertes Zugangs-Cookie (`GATE_SECRET`) |
 | `src/main/account.js` | Chadoodle-Konto: Abgleich von Einstellungen, Mensa-Bestellungen und API-Key (Supabase, Realtime) |
 | `supabase/functions/account` | Edge Function: Moodle-Token prüfen, Konto anlegen/finden, Sitzung ausstellen, Konto löschen |
 

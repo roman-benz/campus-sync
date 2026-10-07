@@ -385,6 +385,12 @@ const handlers = {
     return true;
   },
 
+  // Zugangs-Cookie der Website löschen (functions/api/gate.js) → Login-Seite
+  async gateLogout() {
+    await vfs.flush();
+    await nativeFetch('/api/gate', { method: 'DELETE' }).catch(() => {});
+    location.reload();
+  },
   updateStatus: () => ({ state: 'web' }),
   updateCheck: () => {},
   updateInstall: () => location.reload(),
