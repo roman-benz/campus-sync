@@ -20,6 +20,7 @@
   - **ChatGPT:** „Continue with ChatGPT“ nutzt deinen Plus- oder Pro-Plan, ohne API-Key ([Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source)).
   - **Claude:** mit eigenem Anthropic-API-Key (Standard: Claude Opus 5).
 - **Design** im Stil von Moodle 4 (Navbar, Kursindex, farbcodierte Aktivitäten), moderner und mit Dark Mode.
+- **Chadoodle-Konto:** Dein Moodle-Login ist zugleich dein Konto. Einstellungen, Stundenpläne, Mensa-Bestellungen und auf Wunsch der Claude-API-Key sind dadurch in der Desktop-App und im Browser gleich, Änderungen kommen live an. Kursdateien werden nicht hochgeladen.
 - **Automatische Updates** aus den GitHub-Releases, still im Hintergrund.
 
 ## Installation
@@ -42,6 +43,8 @@ Unter **[chadoodle.romanbenz.com](https://chadoodle.romanbenz.com)** läuft dies
 - Rapla-Stundenpläne und die Mensa-Bestellung erlauben keine Browser-Zugriffe von fremden Seiten. Diese Anfragen leitet eine kleine Cloudflare Pages Function (`functions/api/proxy.js`) weiter, beschränkt auf my-mensa.de und iCal-Kalender.
 
 ## Datenschutz
+
+- **Chadoodle-Konto (Supabase, Frankfurt):** Beim Anmelden prüft der Server dein Moodle-Token einmal bei deiner Moodle-Seite (nur die User-ID) und verwirft es danach. Gespeichert werden Moodle-Adresse und User-ID, abgeglichene Einstellungen, über Chadoodle aufgegebene Mensa-Bestellungen und – nur wenn eingeschaltet – der Claude-API-Key. Nicht gespeichert werden Kursdateien, Kursinhalte, Noten, das Moodle-Token und dein Name. Unter **Einstellungen → Konto** kannst du ein Gerät trennen oder das Konto samt aller Daten löschen.
 
 - Gespeichert wird nur ein Zugriffstoken, kein Kennwort, verschlüsselt mit Windows DPAPI. Das gilt ebenso für API-Key und ChatGPT-Tokens.
 - Kursdaten bleiben lokal. Nur Inhalte, die der KI-Assistent für eine Antwort liest, gehen an den gewählten KI-Anbieter. Namen von Forenautoren werden nie übertragen, Noten nur, wenn du das unter **Einstellungen → KI-Assistent** erlaubst. Aus dem Stundenplan gehen nur Zeit, Titel und Raum mit, keine Beschreibungen. Name und E-Mail für Mensa-Bestellungen kennt die KI nur, wenn du sie ihr im Chat nennst; der Name kommt beim Bestellen direkt aus deinem Moodle-Konto.
@@ -89,6 +92,8 @@ Die Web-Version wird bei jedem Push auf `main` automatisch von Cloudflare Pages 
 | `web/shims/*` | Browser-Ersatz für `fs` (IndexedDB), `electron`, `crypto` und `url` |
 | `web/sw.js`, `web/indexer-worker.js` | Service Worker (Dateien, Moodle-Medien, offline) und Textextraktion im Web Worker |
 | `functions/api/proxy.js` | Pages Function für Rapla und die Mensa-Bestellung |
+| `src/main/account.js` | Chadoodle-Konto: Abgleich von Einstellungen, Mensa-Bestellungen und API-Key (Supabase, Realtime) |
+| `supabase/functions/account` | Edge Function: Moodle-Token prüfen, Konto anlegen/finden, Sitzung ausstellen, Konto löschen |
 
 ## Lizenz
 

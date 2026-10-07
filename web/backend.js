@@ -11,6 +11,7 @@ const { DocIndex } = require('../src/main/docindex');
 const { AiTools } = require('../src/main/ai-tools');
 const { Timetables, RAPLA_TEMPLATE } = require('../src/main/timetable');
 const { Mensa, DEFAULT_URL: MENSA_DEFAULT } = require('../src/main/mensa');
+const { Account } = require('../src/main/account');
 const { Anthropic } = require('@anthropic-ai/sdk');
 
 const VERSION = globalThis.CHADOODLE_VERSION;
@@ -40,7 +41,7 @@ globalThis.fetch = async (input, init = {}) => {
     const method = String(init.method || (typeof input === 'object' && input.method) || 'GET').toUpperCase();
     // Lesende Abrufe fremder Seiten ohne CORS (z. B. iCal-Links) über den Proxy wiederholen –
     // nie Moodle (Token) und nie die KI-Anbieter
-    const own = /(^|\.)anthropic\.com$/i.test(u.hostname) || (sync.client && sync.client.isSiteUrl(u.href));
+    const own = /(^|\.)(anthropic\.com|supabase\.co)$/i.test(u.hostname) || (sync.client && sync.client.isSiteUrl(u.href));
     if (method === 'GET' && navigator.onLine && !own && !PROXY_HOSTS.some((r) => r.test(u.hostname))) {
       try {
         return await viaProxy(u, init);
@@ -96,6 +97,7 @@ const docIndex = new DocIndex(sync);
 const aiTools = new AiTools(sync, docIndex);
 const timetables = new Timetables();
 const mensa = new Mensa();
+const account = new Account(mensa);
 aiTools.timetables = timetables;
 aiTools.mensa = mensa;
 aiTools.onPrepareCart = (cart) => send('mensa:prepare', cart);
@@ -234,6 +236,7 @@ const handlers = {
     loggedIn: !!sync.client,
     settings: { ...store.getSettings(), aiProvider: 'claude' },
     hasClaudeKey: !!store.getSecret('anthropicKey'),
+    account: account.status,
     version: VERSION,
     update: { state: 'web' },
     chatgpt: CHATGPT_OFF,
@@ -259,11 +262,13 @@ const handlers = {
     store.setSecret('moodleToken', result.token);
     store.setSecret('moodlePrivateToken', result.privateToken);
     startSession();
+    account.login(site, result.token).catch((e) => account.setStatus('error', e.message));
     return true;
   },
-  logout({ deleteFiles }) {
+  async logout({ deleteFiles }) {
     const files = deleteFiles && sync.cache ? Object.values(sync.cache.files).map((f) => f.localPath) : [];
     sync.detach();
+    await account.logout();
     store.setSecret('moodleToken', null);
     store.setSecret('moodlePrivateToken', null);
     for (const f of files) vfs.rmSync(f, { force: true });
@@ -281,7 +286,26 @@ const handlers = {
   },
   setClaudeKey(key) {
     store.setSecret('anthropicKey', key || null);
+    account.keyChanged(key || null);
     return true;
+  },
+  async accountConnect() {
+    const token = store.getSecret('moodleToken');
+    if (!token) throw new Error('Bitte zuerst bei Moodle anmelden.');
+    await account.login(store.getSettings().siteUrl, token);
+    return account.status;
+  },
+  async accountDisconnect() {
+    await account.logout({ disable: true });
+    return account.status;
+  },
+  async accountDelete() {
+    await account.deleteAccount();
+    return account.status;
+  },
+  async accountSync() {
+    await account.pull();
+    return account.status;
   },
   pickFolder: () => null,
   async openFile(id, tab) {
@@ -426,12 +450,26 @@ const ready = (async () => {
   mensa.on('changed', () => send('mensa:changed'));
   mensa.start();
 
+  account.on('status', (st) => send('account:status', st));
+  account.on('changed', (c) => {
+    const s = c.settings || {};
+    if ('timetables' in s) timetables.refreshAll();
+    else if ('timetableActive' in s) send('tt:changed');
+    if ('mensaUrl' in s) mensa.fetch().catch(() => {});
+    send('account:changed', { settings: Object.keys(s), key: !!c.key, orders: !!c.orders });
+  });
+  account.start();
+
   // Zurück im Tab oder wieder online: nachsynchronisieren, falls der letzte Sync länger her ist
   const catchUp = () => {
     const interval = Math.max(5, Number(store.getSettings().syncIntervalMin) || 30) * 60 * 1000;
     if (sync.client && sync.cache && Date.now() - sync.cache.lastSync > interval) sync.run();
   };
-  document.addEventListener('visibilitychange', () => !document.hidden && catchUp());
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    catchUp();
+    account.pull();
+  });
   window.addEventListener('online', () => sync.run());
   window.addEventListener('pagehide', () => vfs.flush());
 
@@ -460,6 +498,8 @@ Object.assign(api, {
   onAuthExpired: on('auth:expired'),
   onAi: on('ai:event'),
   onUpdateStatus: on('update:status'),
+  onAccountStatus: on('account:status'),
+  onAccountChanged: on('account:changed'),
 });
 // Gleiche Aufrufform wie preload.js
 api.aiStop = (provider, id) => ready.then(() => handlers.aiStop(provider, id));

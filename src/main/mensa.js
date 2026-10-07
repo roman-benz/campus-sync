@@ -314,7 +314,19 @@ class Mensa extends EventEmitter {
       at: Date.now(),
     };
     store.writeJson(this.ordersPath(), [entry, ...this.orders()].slice(0, 200));
+    this.emit('ordered', entry);
     return entry;
+  }
+
+  // Bestellungen von anderen Geräten übernehmen (Chadoodle-Konto); true, wenn neue dazukamen
+  importOrders(list) {
+    const have = this.orders();
+    const known = new Set(have.map((o) => o.no));
+    const fresh = (list || []).filter((o) => o && o.no && !known.has(o.no));
+    if (!fresh.length) return false;
+    const all = [...have, ...fresh].sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 200);
+    store.writeJson(this.ordersPath(), all);
+    return true;
   }
 
   ordersPath() {

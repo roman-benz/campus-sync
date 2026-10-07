@@ -34,6 +34,10 @@ const DEFAULTS = {
   mensaFirstName: '',
   mensaLastName: '',
   mensaEmail: '',
+  // Chadoodle-Konto: Claude-API-Key mit dem Konto abgleichen (sonst bleibt er nur auf dem Gerät)
+  aiKeySync: true,
+  // Konto auf diesem Gerät bewusst getrennt (nicht synchronisiert)
+  accountOff: false,
 };
 
 function file(name) {
@@ -80,11 +84,31 @@ function getSettings() {
   return settings;
 }
 
-function setSettings(patch) {
+// Beobachter für Änderungen (Konto-Abgleich). opts.remote: Änderung kam von einem anderen Gerät.
+const listeners = new Set();
+function onSettingsChange(fn) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+function setSettings(patch, opts = {}) {
   const saved = { ...readJson(file('settings.json'), {}), ...patch, settingsVersion: SETTINGS_VERSION };
   writeJson(file('settings.json'), saved);
   settings = null;
-  return getSettings();
+  const s = getSettings();
+  for (const fn of listeners) {
+    try {
+      fn(patch, opts);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+  return s;
+}
+
+// Selbst geänderte (nicht voreingestellte) Einstellungen
+function savedSettings() {
+  return readJson(file('settings.json'), {});
 }
 
 // Geheimnisse werden mit Windows DPAPI (safeStorage) verschlüsselt abgelegt.
@@ -112,4 +136,4 @@ function setSecret(key, value) {
   writeJson(file('secrets.json'), all);
 }
 
-module.exports = { getSettings, setSettings, getSecret, setSecret, readJson, writeJson, file };
+module.exports = { getSettings, setSettings, onSettingsChange, savedSettings, getSecret, setSecret, readJson, writeJson, file };

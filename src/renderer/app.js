@@ -219,6 +219,20 @@ async function boot() {
     else updateTtProgress();
   }, 30 * 1000);
   api.onAuthExpired(() => toast('Moodle-Sitzung abgelaufen – bitte neu anmelden.', true));
+  // Chadoodle-Konto: Status und Änderungen von anderen Geräten
+  api.onAccountStatus((st) => {
+    if (!S.state) return;
+    S.state.account = st;
+    if (S.route.name === 'settings' && S.ui.settingsTab === 'account') renderMain();
+  });
+  api.onAccountChanged(async (c) => {
+    S.state = await api.state();
+    if (c.settings.includes('theme')) applyTheme(S.state.settings.theme);
+    if (c.orders && S.mensa) S.mensa.orders = await api.mensaOrders();
+    if (!S.state.loggedIn) return;
+    if (['settings', 'mensa', 'dashboard'].includes(S.route.name)) renderMain();
+    if (c.key || c.settings.some((k) => /^(ai|claude|chatgpt)/.test(k))) renderClaude();
+  });
   api.onAi(onAiEvent);
   api.onIndexStatus((st) => {
     S.index = st;
@@ -1606,7 +1620,8 @@ function renderSettings() {
       <div class="dd-user" style="padding:6px 0 14px"><div class="avatar" style="width:52px;height:52px">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</div><div><b style="font-size:16px">${esc(site.fullname)}</b><div class="muted small">${esc(site.sitename)} · ${esc(site.url)}</div><div class="muted small">Moodle ${esc(site.release || '')}</div></div></div>
       ${row('Abmelden', 'Entfernt das Zugriffstoken; lokale Dateien bleiben auf Wunsch erhalten', '<button class="btn sm danger" data-action="logout">Abmelden</button>')}
       ${row('Version', 'Chadoodle', `<span class="muted">${esc(S.state.version)}</span>`)}
-    </div></div>`;
+    </div></div>
+    ${accountCard(row, sw)}`;
   }
   return `<div class="page">
     <div class="page-head"><div><h1>Einstellungen</h1></div></div>
@@ -1616,6 +1631,39 @@ function renderSettings() {
     </div>
   </div>`;
 }
+
+// Chadoodle-Konto: gleicht Einstellungen, Stundenpläne, Mensa-Bestellungen und den API-Key zwischen
+// Desktop-App und chadoodle.romanbenz.com ab. Kursdateien bleiben auf dem Gerät.
+function accountCard(row, sw) {
+  const a = S.state.account || { state: 'off' };
+  const s = S.state.settings;
+  const other = WEB ? 'der Desktop-App' : 'chadoodle.romanbenz.com';
+  const status = {
+    off: ['Nicht verbunden', '<button class="btn sm primary" data-action="account-connect">Verbinden</button>'],
+    connecting: [`${icon('refresh', 'sm spin')} Verbinde…`, ''],
+    ok: [`<span class="chip ok">${icon('check', 'sm')} Verbunden</span> Zuletzt abgeglichen ${esc(relTime(a.lastSync))}`, `<button class="btn sm" data-action="account-sync">${icon('refresh', 'sm')} Jetzt abgleichen</button>`],
+    error: [`<span class="chip warn">${a.connected ? 'Abgleich gestört' : 'Nicht verbunden'}</span> ${esc(a.message || '')}`, `<button class="btn sm" data-action="${a.connected ? 'account-sync' : 'account-connect'}">Erneut versuchen</button>`],
+  }[a.state] || ['–', ''];
+  const on = !!a.connected;
+  return `<div class="card" style="margin-top:16px"><div class="card-head"><h2>${icon('refresh')} Chadoodle-Konto</h2></div><div class="card-body">
+    <p class="muted small" style="margin:0 0 12px">Dein Moodle-Login ist zugleich dein Chadoodle-Konto. Damit sind Einstellungen, Stundenpläne, Mensa-Bestellungen${s.aiKeySync ? ' und dein Claude-API-Key' : ''} automatisch auch in ${other} verfügbar. Kursdateien und dein Moodle-Zugang werden nicht hochgeladen.</p>
+    ${row('Status', status[0], status[1])}
+    ${row('Claude-API-Key abgleichen', 'Der Key wird in deinem Konto gespeichert (nur für dich lesbar). Aus: Er bleibt nur auf diesem Gerät.', sw('aiKeySync', s.aiKeySync))}
+    ${on ? row('Trennen', 'Dieses Gerät gleicht nicht mehr ab; die Daten im Konto bleiben erhalten', '<button class="btn sm ghost" data-action="account-disconnect">Trennen</button>') : ''}
+    ${on ? row('Konto löschen', 'Löscht alle abgeglichenen Daten im Konto. Lokale Daten auf diesem Gerät bleiben.', '<button class="btn sm ghost danger" data-action="account-delete">Konto löschen</button>') : ''}
+  </div></div>`;
+}
+
+const accountRun = async (fn, ok) => {
+  try {
+    S.state.account = await fn();
+    if (ok) toast(ok);
+  } catch (e) {
+    toast(cleanErr(e), true);
+  }
+  S.state = await api.state();
+  renderMain();
+};
 
 // ---------- Dokumente: Viewer & Volltextsuche ----------
 const isPdf = (f) => /\.pdf$/i.test(f.filename) || f.mimetype === 'application/pdf';
@@ -2436,6 +2484,12 @@ const actions = {
     applyTheme(el.dataset.v);
     renderMain();
   },
+  'account-connect': () => accountRun(() => api.accountConnect(), 'Mit dem Chadoodle-Konto verbunden'),
+  'account-sync': () => accountRun(() => api.accountSync()),
+  'account-disconnect': () => accountRun(() => api.accountDisconnect(), 'Dieses Gerät gleicht nicht mehr ab'),
+  'account-delete': () => showModal(`<h3>Chadoodle-Konto löschen?</h3><p>Alle abgeglichenen Einstellungen, Mensa-Bestellungen und der gespeicherte API-Key werden aus dem Konto gelöscht. Auf diesem Gerät bleibt alles erhalten; andere Geräte gleichen danach nicht mehr ab.</p>
+    <div class="row"><button class="btn" data-action="modal-close">Abbrechen</button><button class="btn danger" data-action="account-delete-confirm">Endgültig löschen</button></div>`),
+  'account-delete-confirm': () => { closeModal(); accountRun(() => api.accountDelete(), 'Chadoodle-Konto gelöscht'); },
   'remove-key': async () => { await api.setClaudeKey(null); S.state = await api.state(); renderMain(); renderClaude(); },
   'set-provider': async (el) => {
     closeModal();

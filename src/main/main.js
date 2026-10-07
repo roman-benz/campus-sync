@@ -31,6 +31,7 @@ const { AiTools } = require('./ai-tools');
 const { Updater } = require('./updater');
 const { Timetables, RAPLA_TEMPLATE } = require('./timetable');
 const { Mensa, DEFAULT_URL: MENSA_DEFAULT } = require('./mensa');
+const { Account } = require('./account');
 
 const ICON = path.join(__dirname, '..', '..', 'build', 'icon.png');
 const APP_NAME = 'Chadoodle';
@@ -52,6 +53,7 @@ const docIndex = new DocIndex(sync);
 const aiTools = new AiTools(sync, docIndex);
 const timetables = new Timetables();
 const mensa = new Mensa();
+const account = new Account(mensa);
 aiTools.timetables = timetables;
 aiTools.mensa = mensa;
 aiTools.onPrepareCart = (cart) => send('mensa:prepare', cart);
@@ -154,6 +156,7 @@ function showWindow() {
   // Beim Öffnen nachsynchronisieren, falls der letzte Sync länger her ist
   const interval = Math.max(5, Number(store.getSettings().syncIntervalMin) || 30) * 60 * 1000;
   if (sync.client && sync.cache && Date.now() - sync.cache.lastSync > interval) sync.run();
+  account.pull();
 }
 
 function createTray() {
@@ -289,6 +292,7 @@ function registerIpc() {
     loggedIn: !!sync.client,
     settings: store.getSettings(),
     hasClaudeKey: !!store.getSecret('anthropicKey') || !!process.env.ANTHROPIC_API_KEY,
+    account: account.status,
     version: app.getVersion(),
     update: updater.status,
     chatgpt: chatgptAuth.status(),
@@ -315,6 +319,8 @@ function registerIpc() {
     store.setSecret('moodleToken', result.token);
     store.setSecret('moodlePrivateToken', result.privateToken);
     startSession();
+    // Chadoodle-Konto verbinden (läuft im Hintergrund; ohne Netz klappt es beim nächsten Start)
+    account.login(site, result.token).catch((e) => account.setStatus('error', e.message));
     return true;
   });
 
@@ -324,6 +330,7 @@ function registerIpc() {
     const files = deleteFiles && sync.cache ? Object.values(sync.cache.files).map((f) => f.localPath) : [];
     const courseDirs = deleteFiles && sync.cache ? sync.cache.courses.map((k) => sync.courseDir(k)) : [];
     sync.detach();
+    await account.logout();
     store.setSecret('moodleToken', null);
     store.setSecret('moodlePrivateToken', null);
     for (const f of files) fs.rmSync(f, { force: true });
@@ -353,7 +360,28 @@ function registerIpc() {
 
   ipcMain.handle('settings:set-claude-key', (_e, key) => {
     store.setSecret('anthropicKey', key || null);
+    account.keyChanged(key || null);
     return true;
+  });
+
+  // Chadoodle-Konto
+  ipcMain.handle('account:connect', async () => {
+    const token = store.getSecret('moodleToken');
+    if (!token) throw new Error('Bitte zuerst bei Moodle anmelden.');
+    await account.login(store.getSettings().siteUrl, token);
+    return account.status;
+  });
+  ipcMain.handle('account:disconnect', async () => {
+    await account.logout({ disable: true });
+    return account.status;
+  });
+  ipcMain.handle('account:delete', async () => {
+    await account.deleteAccount();
+    return account.status;
+  });
+  ipcMain.handle('account:sync', async () => {
+    await account.pull();
+    return account.status;
   });
 
   ipcMain.handle('settings:pick-folder', async () => {
@@ -488,6 +516,18 @@ app.whenReady().then(() => {
   timetables.start();
   mensa.on('changed', () => send('mensa:changed'));
   mensa.start();
+
+  // Änderungen von anderen Geräten (Chadoodle-Konto) anwenden
+  account.on('status', (st) => send('account:status', st));
+  account.on('changed', (c) => {
+    const s = c.settings || {};
+    if (s.theme) nativeTheme.themeSource = s.theme;
+    if ('timetables' in s) timetables.refreshAll();
+    else if ('timetableActive' in s) send('tt:changed');
+    if ('mensaUrl' in s) mensa.fetch().catch(() => {});
+    send('account:changed', { settings: Object.keys(s), key: !!c.key, orders: !!c.orders });
+  });
+  account.start();
 
   updater.on('status', (st) => send('update:status', st));
   updater.start();
