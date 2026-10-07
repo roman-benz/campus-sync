@@ -8,6 +8,7 @@ const { app } = require('electron');
 const store = require('./store');
 
 const sha = (s) => crypto.createHash('sha1').update(s).digest('hex');
+const IMAGE_EXT = { 'image/svg+xml': '.svg', 'image/png': '.png', 'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp', 'image/bmp': '.bmp', 'image/avif': '.avif' };
 
 function safeName(name, max = 80) {
   let s = String(name || 'Unbenannt')
@@ -391,19 +392,26 @@ class SyncEngine extends EventEmitter {
     return f;
   }
 
+  // Bilder mit passender Endung ablegen: Ohne Endung erkennt Chromium JPG/PNG noch am Inhalt, SVG aber
+  // nicht – und Moodle liefert für Kurse ohne eigenes Bild ein erzeugtes Muster als course.svg.
   async cacheImage(url, key) {
     if (!url) return null;
     if (url.startsWith('data:')) return url;
     const dir = store.file(path.join('cache', 'img'));
-    const dest = path.join(dir, `${sha(this.client.siteUrl).slice(0, 8)}-${key}`);
+    const base = path.join(dir, `${sha(this.client.siteUrl).slice(0, 8)}-${key}`);
+    const variants = ['', ...new Set(Object.values(IMAGE_EXT))].map((e) => base + e);
     try {
       const { buffer, type } = await this.client.fetchBuffer(url);
-      if (!/^image\//.test(type)) return null;
+      const mime = type.split(';')[0].trim().toLowerCase();
+      if (!/^image\//.test(mime)) return null;
+      const dest = base + (IMAGE_EXT[mime] || '');
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(dest, buffer);
+      for (const v of variants) if (v !== dest) fs.rmSync(v, { force: true });
       return require('url').pathToFileURL(dest).href + '?v=' + Date.now().toString(36);
     } catch {
-      return fs.existsSync(dest) ? require('url').pathToFileURL(dest).href : null;
+      const found = variants.find((v) => fs.existsSync(v));
+      return found ? require('url').pathToFileURL(found).href : null;
     }
   }
 
