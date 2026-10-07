@@ -111,7 +111,7 @@ class SyncEngine extends EventEmitter {
       const info = await c.call('core_webservice_get_site_info');
       c.userid = info.userid;
       next.site = {
-        url: c.siteUrl, sitename: info.sitename, fullname: info.fullname, firstname: info.firstname,
+        url: c.siteUrl, sitename: info.sitename, fullname: info.fullname, firstname: info.firstname, lastname: info.lastname,
         userid: info.userid, userpictureurl: info.userpictureurl, release: info.release, lang: info.lang,
       };
       next.site.avatar = await this.cacheImage(info.userpictureurl, 'avatar');

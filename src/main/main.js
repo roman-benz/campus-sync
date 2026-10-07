@@ -52,6 +52,24 @@ const docIndex = new DocIndex(sync);
 const aiTools = new AiTools(sync, docIndex);
 const timetables = new Timetables();
 const mensa = new Mensa();
+aiTools.timetables = timetables;
+aiTools.mensa = mensa;
+aiTools.onPrepareCart = (cart) => send('mensa:prepare', cart);
+aiTools.onOrdered = (entry) => send('mensa:ordered', entry);
+// Bestellungen des Assistenten bestätigt der Nutzer im Fenster; ohne Antwort binnen 10 Min. = abgelehnt
+const orderConfirms = new Map();
+aiTools.confirmOrder = (summary) =>
+  new Promise((resolve) => {
+    if (!win || win.isDestroyed()) return resolve(false);
+    const id = crypto.randomUUID();
+    const timer = setTimeout(() => orderConfirms.delete(id) && resolve(false), 10 * 60 * 1000);
+    orderConfirms.set(id, (ok) => {
+      clearTimeout(timer);
+      resolve(ok);
+    });
+    showWindow();
+    send('mensa:confirm', { id, ...summary });
+  });
 const claude = new ClaudeAssistant(aiTools);
 const chatgptAuth = new ChatGPTAuth();
 const chatgpt = new ChatGPTAssistant(aiTools, chatgptAuth);
@@ -425,6 +443,13 @@ function registerIpc() {
   ipcMain.handle('mensa:order-options', (_e, date, email) => mensa.orderOptions(String(date || ''), String(email || '')));
   ipcMain.handle('mensa:place-order', (_e, o) => mensa.order(o || {}));
   ipcMain.handle('mensa:orders', () => mensa.orders());
+  ipcMain.handle('mensa:confirm-reply', (_e, id, ok) => {
+    const done = orderConfirms.get(id);
+    if (!done) return false;
+    orderConfirms.delete(id);
+    done(ok === true);
+    return true;
+  });
 
   // Dokumente: Volltextsuche, Seiten, Rohdaten für den PDF-Viewer
   ipcMain.handle('doc:search', (_e, q, opts) => docIndex.search(q, opts || {}));

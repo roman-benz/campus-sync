@@ -150,7 +150,7 @@ function renderMd(src) {
       return `${math.length - 1}`;
     })))
     .join('');
-  let html = DOMPurify.sanitize(marked.parse(withMath), { ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|doc):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i });
+  let html = DOMPurify.sanitize(marked.parse(withMath), { ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|doc|mensa):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i });
   html = html.replace(/(\d+)/g, (_m, i) => {
     try {
       return katex.renderToString(math[i].tex, { displayMode: math[i].display, throwOnError: false });
@@ -176,6 +176,37 @@ async function boot() {
   api.onDataUpdated(async () => { S.data = await api.data(); renderNav(); renderLeft(); renderMain(); });
   api.onFilesUpdated(async () => { S.data = await api.data(); if (['course', 'module', 'dashboard'].includes(S.route.name)) renderMain(); });
   api.onMensa(() => { if (S.route.name === 'mensa') loadMensa(); });
+  // Der Assistent hat einen Warenkorb vorbereitet (bestellt wird erst nach Klick des Nutzers)
+  api.onMensaPrepare(({ date, items, time }) => {
+    const m = S.mensa;
+    m.cart[date] = { ...items };
+    if (time) m.time[date] = time;
+    m.day = date;
+    if (S.route.name === 'mensa') renderMain();
+    toast('Warenkorb vom Assistenten vorbereitet – im Reiter Mensa prüfen und bestellen');
+  });
+  // Der Assistent möchte bestellen: erst nach Klick auf „Verbindlich bestellen“ geht die Bestellung raus
+  api.onMensaConfirm((o) => {
+    const total = o.lines.reduce((s, l) => s + (l.dhbw || 0) * l.n, 0);
+    showModal(`<div class="mensa-ai-confirm" data-id="${esc(o.id)}" hidden></div>
+      <h3>${icon('sparkles', 'sm')} Der Assistent möchte bestellen</h3>
+      <p class="muted" style="margin:4px 0 14px">${esc(o.label)} · Abholung ${esc(o.time)}–${esc(o.until)} Uhr</p>
+      <table class="mensa-basket">${o.lines.map((l) => `<tr><td class="n">${l.n}×</td><td>${esc(l.title)}</td><td class="p">${euro((l.dhbw || 0) * l.n)}</td></tr>`).join('')}
+        <tr class="sum"><td></td><td>Summe (DHBW-Preis)</td><td class="p">${euro(total)}</td></tr></table>
+      <dl class="kv small" style="margin-top:14px"><dt>Name</dt><dd>${esc(`${o.firstName} ${o.lastName}`)}</dd><dt>Abholschein an</dt><dd>${esc(o.email)}</dd></dl>
+      <p class="muted small">Mit dem Klick akzeptierst du die ${o.termsUrl ? `<a href="#" data-action="external" data-url="${esc(o.termsUrl)}">Nutzungsvereinbarung</a>` : 'Nutzungsvereinbarung'} der Mensa. Die Bestellung ist verbindlich.</p>
+      <div class="row"><button class="btn" data-action="mensa-ai-reply" data-ok="0">Abbrechen</button><button class="btn primary" data-action="mensa-ai-reply" data-ok="1">${icon('check', 'sm')} Verbindlich bestellen</button></div>`);
+  });
+  api.onMensaOrdered((r) => {
+    const m = S.mensa;
+    m.orders = [r, ...(m.orders || []).filter((x) => x.no !== r.no)];
+    delete m.cart[r.date];
+    delete m.time[r.date];
+    if (m.contact && !m.contact.mensaEmail) m.contact.mensaEmail = r.email;
+    if (S.state.settings && !S.state.settings.mensaEmail) S.state.settings.mensaEmail = r.email;
+    toast(`Bestellt · Nr. ${r.no} · Abholung ${r.time} Uhr`);
+    if (S.route.name === 'mensa') loadMensaOpt(true);
+  });
   api.onTimetables(() => { if (S.route.name === 'timetable') loadTimetable(true); });
   setInterval(() => {
     placeNowLine();
@@ -1022,7 +1053,12 @@ function mensaContact() {
   const m = S.mensa;
   if (!m.contact) {
     const st = S.state.settings;
-    m.contact = { mensaFirstName: st.mensaFirstName || '', mensaLastName: st.mensaLastName || '', mensaEmail: st.mensaEmail || '' };
+    // Ohne eigene Eingabe: Name aus dem Moodle-Konto
+    const site = (S.data && S.data.site) || {};
+    const first = st.mensaFirstName || site.firstname || '';
+    let last = st.mensaLastName || site.lastname || '';
+    if (!last && site.fullname && first && site.fullname.startsWith(first)) last = site.fullname.slice(first.length).trim();
+    m.contact = { mensaFirstName: first, mensaLastName: last, mensaEmail: st.mensaEmail || '' };
   }
   return m.contact;
 }
@@ -1519,7 +1555,7 @@ function renderSettings() {
     const pcard = (v, title, sub, ic, cls) => `<button class="prov-card ${p === v ? 'on' : ''}" data-action="set-provider" data-v="${v}"><div class="cp-logo ${cls}">${icon(ic)}</div><div><b>${title}</b><small>${sub}</small></div>${p === v ? `<span class="chip ok">${icon('check', 'sm')} Aktiv</span>` : ''}</button>`;
     body = `<div class="stack">
       <div class="card"><div class="card-head"><h2>${icon('sparkles')} KI-Assistent</h2></div><div class="card-body">
-        <p class="muted small" style="margin:0 0 12px">Der Assistent durchsucht deine synchronisierten Unterlagen, findet die passenden Stellen und erklärt sie. Wähle, womit er arbeitet:</p>
+        <p class="muted small" style="margin:0 0 12px">Der Assistent durchsucht deine synchronisierten Unterlagen, findet die passenden Stellen und erklärt sie. Er kennt außerdem Stundenplan und Speiseplan und kann Essen für dich bestellen – verbindlich erst, wenn du im Bestätigungsdialog zustimmst. Wähle, womit er arbeitet:</p>
         <div class="prov-grid">
           ${pcard('chatgpt', 'ChatGPT', 'Mit deinem Plus-/Pro-Plan – ohne API-Key', 'message', 'p-chatgpt')}
           ${pcard('claude', 'Claude', 'Mit eigenem Anthropic-API-Key', 'sparkles', 'p-claude')}
@@ -2210,6 +2246,15 @@ const actions = {
     if ($('#modal .dish-modal')) actions['mensa-dish']({ dataset: { i: $('#modal .dish-modal').dataset.i } });
     renderMain();
   },
+  'mensa-ai-reply': (el) => {
+    const ask = $('#modal .mensa-ai-confirm');
+    if (!ask) return;
+    ask.dataset.done = '1';
+    const ok = el.dataset.ok === '1';
+    api.mensaConfirmReply(ask.dataset.id, ok);
+    closeModal();
+    if (ok) toast('Bestellung wird abgeschickt…');
+  },
   'mensa-time': (el) => { S.mensa.time[S.mensa.day] = el.dataset.v; renderMain(); },
   'mensa-agree': () => { S.mensa.agree = !S.mensa.agree; renderMain(); },
   'mensa-checkout': () => {
@@ -2532,7 +2577,14 @@ function showModal(inner) {
   bg.addEventListener('click', (e) => e.target === bg && closeModal());
   document.body.appendChild(bg);
 }
-function closeModal() { const m = $('#modal'); if (m) m.remove(); }
+function closeModal() {
+  const m = $('#modal');
+  if (!m) return;
+  // Offene Bestellanfrage des Assistenten: Schließen ohne Klick auf „Bestellen“ = abgelehnt
+  const ask = m.querySelector('.mensa-ai-confirm');
+  if (ask && !ask.dataset.done) api.mensaConfirmReply(ask.dataset.id, false);
+  m.remove();
+}
 
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-action]');
@@ -2554,6 +2606,14 @@ document.addEventListener('click', (e) => {
       const id = u.hostname || u.pathname.replace(/^\/+/, '');
       if (S.data.files[id]) openDoc(id, Number(u.searchParams.get('page')) || 1);
       else toast('Dokument nicht gefunden', true);
+      return;
+    }
+    // mensa://YYYY-MM-DD → Mensa-Reiter an diesem Tag, direkt beim Bestellbereich
+    if (href.startsWith('mensa://')) {
+      const date = href.slice('mensa://'.length).replace(/\/+$/, '');
+      if (/^\d{4}-\d{2}-\d{2}$/.test(date)) S.mensa.day = date;
+      go('mensa');
+      setTimeout(() => actions['mensa-goto-order'](), 400);
       return;
     }
     if (/^https?:/i.test(href)) api.openExternal(href);

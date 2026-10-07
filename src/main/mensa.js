@@ -7,7 +7,7 @@ const store = require('./store');
 
 const DEFAULT_URL = 'https://zuf.my-mensa.de/mensatogo.php?mensa=mensa_fallenbrunnen';
 const STALE_MS = 30 * 60 * 1000;
-const CACHE_VERSION = 2; // v2: Artikel-ID (a_id) für Bestellungen
+const CACHE_VERSION = 3; // v2: Artikel-ID (a_id) für Bestellungen, v3: Windows-1252-Zeichen repariert
 const CONFIG_TTL = 10 * 60 * 1000;
 const REFRESH_MS = 3 * 60 * 60 * 1000;
 // Wie jQuery.ajax auf der Bestellseite
@@ -30,6 +30,7 @@ function parseMensaUrl(input) {
 }
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', shy: '', euro: '€' };
+const CP1252 = ['€', '', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '', 'Ž', '', '', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '', 'ž', 'Ÿ'];
 function clean(s) {
   return String(s || '')
     .replace(/<br\s*\/?>/gi, ' ')
@@ -39,6 +40,8 @@ function clean(s) {
       return e.toLowerCase() in ENTITIES ? ENTITIES[e.toLowerCase()] : m;
     })
     .replace(/­/g, '')
+    // Steuerzeichen U+0080–U+009F sind falsch kodierte Windows-1252-Zeichen (z. B. 0x96 = „–“)
+    .replace(/[\u0080-\u009f]/g, (ch) => CP1252[ch.charCodeAt(0) - 0x80] || '')
     .replace(/\s+/g, ' ')
     .trim();
 }

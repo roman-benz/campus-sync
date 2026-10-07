@@ -16,7 +16,7 @@
 - **Stundenplan:** Eigener Reiter mit Wochenansicht aus Rapla oder jedem iCal-Kalender (`https://…`, `webcal://…`). Der Rapla-Plan TSA25 der DHBW Ravensburg ist als Vorlage eingetragen; eigene Links lassen sich hinzufügen. Der Plan wird lokal gespeichert und ist offline verfügbar.
 - **Mensa:** Speiseplan der Mensa Fallenbrunnen (oder jeder anderen Mensa auf my-mensa.de) mit Fotos, Beschreibung, Preisen (DHBW/intern/extern), vegan/vegetarisch-Kennzeichnung und Allergenen. Der letzte Stand bleibt offline sichtbar. Bestellen direkt in der App: Gerichte in den Warenkorb, Abholzeit wählen (passende Pausen aus dem Stundenplan sind markiert), der Abholschein kommt per E-Mail.
 - **Volltextsuche:** Alle Dokumente werden seitengenau indexiert. Die Suche in der Kopfzeile (Strg+Umschalt+F) findet Stellen in allen Skripten und springt direkt zur Seite.
-- **KI-Lernassistent** (Strg+K): Durchsucht die Unterlagen, liest die passenden Seiten und erklärt sie. Fundstellen erscheinen als Links, die im Viewer an der richtigen Seite öffnen. Markierten Text im Viewer kannst du direkt „erklären“ lassen.
+- **KI-Lernassistent** (Strg+K): Durchsucht die Unterlagen, liest die passenden Seiten und erklärt sie. Fundstellen erscheinen als Links, die im Viewer an der richtigen Seite öffnen. Markierten Text im Viewer kannst du direkt „erklären“ lassen. Er kennt auch Stundenplan und Speiseplan („Wann passt morgen die Mensa?“) und legt dir Essen in den Warenkorb oder bestellt es für dich – verbindlich erst, wenn du im Bestätigungsdialog der App auf „Bestellen“ klickst.
   - **ChatGPT:** „Continue with ChatGPT“ nutzt deinen Plus- oder Pro-Plan, ohne API-Key ([Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source)).
   - **Claude:** mit eigenem Anthropic-API-Key (Standard: Claude Opus 5).
 - **Design** im Stil von Moodle 4 (Navbar, Kursindex, farbcodierte Aktivitäten), moderner und mit Dark Mode.
@@ -34,7 +34,7 @@ Voraussetzung: Die Moodle-Seite muss die Schnittstelle der offiziellen Moodle-Ap
 ## Datenschutz
 
 - Gespeichert wird nur ein Zugriffstoken, kein Kennwort, verschlüsselt mit Windows DPAPI. Das gilt ebenso für API-Key und ChatGPT-Tokens.
-- Kursdaten bleiben lokal. Nur Inhalte, die der KI-Assistent für eine Antwort liest, gehen an den gewählten KI-Anbieter. Namen von Forenautoren werden nie übertragen, Noten nur, wenn du das unter **Einstellungen → KI-Assistent** erlaubst.
+- Kursdaten bleiben lokal. Nur Inhalte, die der KI-Assistent für eine Antwort liest, gehen an den gewählten KI-Anbieter. Namen von Forenautoren werden nie übertragen, Noten nur, wenn du das unter **Einstellungen → KI-Assistent** erlaubst. Aus dem Stundenplan gehen nur Zeit, Titel und Raum mit, keine Beschreibungen. Name und E-Mail für Mensa-Bestellungen kennt die KI nur, wenn du sie ihr im Chat nennst; der Name kommt beim Bestellen direkt aus deinem Moodle-Konto.
 - Kursunterlagen sind urheberrechtlich geschützt, und viele Hochschulen untersagen in ihren Moodle-Nutzungsbedingungen die Weitergabe von Inhalten an Dritte. Kläre vor Nutzung des KI-Assistenten, ob deine Hochschule das erlaubt.
 - Das Zugriffstoken wird nur an die eigene Moodle-Seite gesendet. Inhalte, die auf fremde Server verweisen, werden ohne Token geladen oder blockiert.
 
@@ -66,7 +66,7 @@ npm run dist       # Installer lokal nach out/ bauen
 | `src/main/moodle.js` | Moodle-Webservice-Client, Passwort- und SSO-Login, Downloads |
 | `src/main/sync.js` | Hintergrund-Sync, Dateiindex, inkrementelle Downloads, Benachrichtigungen |
 | `src/main/docindex.js`, `extract.js`, `indexer-worker.js` | Seitengenauer Volltextindex in einem Hintergrundprozess |
-| `src/main/ai-tools.js` | Gemeinsame KI-Werkzeuge (Dokumentsuche, Seiten lesen, Kurse, Termine, Noten) |
+| `src/main/ai-tools.js` | Gemeinsame KI-Werkzeuge (Dokumentsuche, Seiten lesen, Kurse, Termine, Noten, Stundenplan, Speiseplan, Mensa-Warenkorb und -Bestellung) |
 | `src/main/claude.js` | Claude-Chat (Streaming, Tool-Loop, Refusal-Fallback) |
 | `src/main/chatgpt-auth.js`, `chatgpt.js` | Sign in with ChatGPT (OAuth + PKCE) und Chat über die Responses API |
 | `src/main/updater.js` | Automatische Updates (electron-updater, GitHub-Releases) |

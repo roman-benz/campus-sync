@@ -110,7 +110,92 @@ const TOOL_SPECS = [
     description: 'Bewertungen/Noten eines Kurses.',
     input_schema: { type: 'object', properties: { course_id: { type: 'integer' } }, required: ['course_id'] },
   },
+  {
+    name: 'get_timetable',
+    description: 'Vorlesungen aus dem aktiven Stundenplan (Rapla/iCal) mit Uhrzeit, Titel und Raum, nach Tagen gruppiert.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        from_date: { type: 'string', description: 'Erster Tag als YYYY-MM-DD (Standard: heute)' },
+        days: { type: 'integer', description: 'Anzahl Tage ab from_date, 1–21 (Standard 7)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_mensa_menu',
+    description:
+      'Speiseplan der Mensa mit dish_id, Kategorie, Beschreibung, vegan/vegetarisch, Allergenen und Preisen. Für vorbestellbare Tage zusätzlich freie Abholzeiten und Restmengen sowie bereits aufgegebene Bestellungen.',
+    input_schema: {
+      type: 'object',
+      properties: { date: { type: 'string', description: 'Optional: nur dieser Tag (YYYY-MM-DD); sonst alle veröffentlichten Tage' } },
+      required: [],
+    },
+  },
+  {
+    name: 'prepare_mensa_cart',
+    description:
+      'Legt Gerichte für einen Tag in den Mensa-Warenkorb der App (ersetzt den bisherigen Warenkorb dieses Tages) und wählt optional die Abholzeit. Bestellt NICHT – abschicken muss der Nutzer selbst im Reiter Mensa.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'Tag als YYYY-MM-DD' },
+        items: {
+          type: 'array',
+          description: 'Gerichte mit Menge',
+          items: {
+            type: 'object',
+            properties: { dish_id: { type: 'string', description: 'dish_id aus get_mensa_menu' }, quantity: { type: 'integer', description: 'Anzahl (1–20)' } },
+            required: ['dish_id', 'quantity'],
+          },
+        },
+        pickup_time: { type: 'string', description: 'Optional: Abholzeit HH:MM aus get_mensa_menu' },
+      },
+      required: ['date', 'items'],
+    },
+  },
+  {
+    name: 'place_mensa_order',
+    description:
+      'Bestellt verbindlich in der Mensa. Die App zeigt dem Nutzer vorher einen Bestätigungsdialog; bestellt wird erst nach seinem Klick. Der Name kommt aus dem Moodle-Konto. Der Abholschein geht an die E-Mail-Adresse.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'Tag als YYYY-MM-DD' },
+        items: {
+          type: 'array',
+          description: 'Gerichte mit Menge',
+          items: {
+            type: 'object',
+            properties: { dish_id: { type: 'string', description: 'dish_id aus get_mensa_menu' }, quantity: { type: 'integer', description: 'Anzahl (1–20)' } },
+            required: ['dish_id', 'quantity'],
+          },
+        },
+        pickup_time: { type: 'string', description: 'Abholzeit HH:MM aus get_mensa_menu' },
+        email: { type: 'string', description: 'E-Mail für den Abholschein. Weglassen, wenn laut get_mensa_menu schon eine in der App gespeichert ist.' },
+      },
+      required: ['date', 'items', 'pickup_time'],
+    },
+  },
 ];
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const LECTURER_TAG = /\s*\([A-ZÄÖÜ][A-Za-zÄÖÜäöü]{1,3}\)\s*$/;
+const localIso = (d) => d.toLocaleDateString('sv-SE');
+const fmtDay = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+const fmtClock = (ms) => new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+const fmtEuro = (n) => (n == null ? '–' : n.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' }));
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Name für Mensa-Bestellungen: in der App eingetragen, sonst aus dem Moodle-Konto
+function orderName(site) {
+  const st = store.getSettings();
+  const first = String(st.mensaFirstName || '').trim() || String((site && site.firstname) || '').trim();
+  let last = String(st.mensaLastName || '').trim() || String((site && site.lastname) || '').trim();
+  // Ältere Caches kennen nur den vollen Namen
+  if (!last && site && site.fullname && first && site.fullname.startsWith(first)) last = site.fullname.slice(first.length).trim();
+  return { first, last };
+}
 
 // Werkzeuge, die der KI aktuell angeboten werden
 function toolSpecs() {
@@ -148,6 +233,9 @@ function instructions(cache) {
       ? '- Für Termine, Abgaben und Noten nutze get_deadlines, read_activity und get_grades.'
       : '- Für Termine und Abgaben nutze get_deadlines und read_activity. Auf Noten hast du keinen Zugriff; der Nutzer kann ihn unter Einstellungen → KI-Assistent freigeben.',
     '- Bei bewerteten Abgaben: erkläre, gib Hinweise und Feedback; eine fertige Lösung zum Abgeben schreibst du nicht, sondern hilfst Schritt für Schritt.',
+    '- Stundenplan: get_timetable. Mensa: get_mensa_menu. Für „wann passt die Mensa?“ kombiniere beides – maßgeblich sind Abholzeit, Mindestpause und Essenszeit aus get_mensa_menu.',
+    '- Mensa-Bestellung: Will der Nutzer bestellen, kläre Tag, Gerichte, Menge und Abholzeit (schlage eine Zeit vor, die in seine Pausen passt) und rufe dann place_mensa_order auf. Ist laut get_mensa_menu keine E-Mail gespeichert, frag nach der E-Mail-Adresse für den Abholschein. Die App lässt den Nutzer die Bestellung in einem Dialog bestätigen – frag deshalb im Chat nicht zusätzlich nach. Sag nur „bestellt“, wenn das Werkzeug eine Bestellnummer zurückgibt.',
+    '- Will der Nutzer nur vormerken oder selbst abschicken, nutze prepare_mensa_cart und verlinke den Warenkorb als [Warenkorb öffnen](mensa://YYYY-MM-DD).',
     '- Antworte auf Deutsch (außer der Nutzer schreibt anders) und formatiere mit Markdown.',
   ].join('\n');
 }
@@ -156,6 +244,13 @@ class AiTools {
   constructor(sync, index) {
     this.sync = sync;
     this.index = index;
+    // Werden in main.js gesetzt: Stundenpläne, Mensa und der Weg zum Warenkorb im Fenster
+    this.timetables = null;
+    this.mensa = null;
+    this.onPrepareCart = null;
+    // Bestätigungsdialog im Fenster (→ Promise<boolean>) und Meldung nach erfolgreicher Bestellung
+    this.confirmOrder = null;
+    this.onOrdered = null;
   }
 
   get cache() {
@@ -201,12 +296,20 @@ class AiTools {
       case 'read_activity': { const m = this.findModule(input.module_id); return `Liest ${m ? m.mod.name : 'Aktivität'}`; }
       case 'get_deadlines': return 'Prüft anstehende Termine';
       case 'get_grades': return `Prüft Bewertungen ${k ? k.shortname || k.fullname : ''}`;
+      case 'get_timetable': return 'Schaut in den Stundenplan';
+      case 'get_mensa_menu': return `Schaut auf den Speiseplan${input && ISO_DATE.test(input.date || '') ? ` (${fmtDay(input.date)})` : ''}`;
+      case 'prepare_mensa_cart': return `Legt Essen in den Warenkorb${input && ISO_DATE.test(input.date || '') ? ` (${fmtDay(input.date)})` : ''}`;
+      case 'place_mensa_order': return 'Bestellt in der Mensa – bitte im Dialog bestätigen';
       default: return name;
     }
   }
 
   // Liefert einen String oder (nur für Claude) Content-Blöcke
   async run(name, input, provider) {
+    if (name === 'get_timetable') return this.timetableText(input);
+    if (name === 'get_mensa_menu') return this.mensaText(input);
+    if (name === 'prepare_mensa_cart') return this.prepareCart(input);
+    if (name === 'place_mensa_order') return this.placeOrder(input);
     const c = this.cache;
     if (!c || !c.site) return 'Noch keine Daten synchronisiert.';
     switch (name) {
@@ -361,6 +464,140 @@ class AiTools {
       }
     }
     throw new Error('Unbekanntes Werkzeug');
+  }
+
+  // ---------- Stundenplan ----------
+  // Nur Zeit, Titel und Raum – Beschreibung und Dozierenden-Kürzel („Elektronik (WiA)“) gehen nicht an den KI-Anbieter
+  timetableText(input) {
+    if (!this.timetables) throw new Error('Stundenplan nicht verfügbar');
+    const list = this.timetables.list();
+    const st = store.getSettings();
+    const plan = list.find((t) => t.id === st.timetableActive) || list[0];
+    if (!plan) return 'Es ist kein Stundenplan eingetragen (Reiter „Stundenplan“).';
+    const from = ISO_DATE.test(input.from_date || '') ? input.from_date : localIso(new Date());
+    const days = Math.max(1, Math.min(21, Number(input.days) || 7));
+    const start = new Date(`${from}T00:00:00`);
+    const end = new Date(start);
+    end.setDate(end.getDate() + days);
+    const events = this.timetables.events(plan.id, start.getTime(), end.getTime()).sort((a, b) => a.start - b.start);
+    const out = [`Stundenplan „${plan.name}“ (Stand ${plan.fetchedAt ? fmtDate(plan.fetchedAt / 1000) : 'unbekannt'}${plan.error ? `, letzte Aktualisierung fehlgeschlagen: ${plan.error}` : ''})`];
+    for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
+      const iso = localIso(d);
+      const dayEvents = events.filter((e) => localIso(new Date(e.start)) === iso || (e.allDay && e.start <= d.getTime() && e.end > d.getTime()));
+      out.push(`\n${fmtDay(iso)}:`);
+      if (!dayEvents.length) out.push('- keine Termine');
+      for (const e of dayEvents) out.push(`- ${e.allDay ? 'ganztägig' : `${fmtClock(e.start)}–${fmtClock(e.end)}`} ${e.title.replace(LECTURER_TAG, '')}${e.location ? ` (${e.location})` : ''}`);
+    }
+    return out.join('\n');
+  }
+
+  // ---------- Mensa ----------
+  async mensaText(input) {
+    if (!this.mensa) throw new Error('Mensa nicht verfügbar');
+    const data = await this.mensa.get();
+    const only = ISO_DATE.test(input.date || '') ? input.date : null;
+    const days = data.days.filter((d) => !only || d.date === only);
+    const st = store.getSettings();
+    const out = [
+      `${data.name} – Speiseplan (Stand ${fmtDate(Math.round(data.fetchedAt / 1000))}${data.error ? `, Aktualisierung fehlgeschlagen: ${data.error}` : ''}).`,
+      `Einstellungen des Nutzers für einen Mensabesuch: Abholung ${st.mensaPickupFrom || '11:45'}–${st.mensaPickupTo || '13:30'}, Pause mindestens ${st.mensaMinBreak || 44} Min., ab Abholbeginn ${st.mensaMinEat || 30} Min. zum Essen.`,
+      `E-Mail für den Abholschein in der App gespeichert: ${EMAIL.test(String(st.mensaEmail || '').trim()) ? 'ja (bei place_mensa_order weglassen)' : 'nein – vor dem Bestellen erfragen'}.`,
+    ];
+    if (!days.length) return out.concat(only ? `Für ${fmtDay(only)} ist kein Speiseplan veröffentlicht.` : 'Es ist noch kein Speiseplan veröffentlicht.').join('\n');
+    const opts = await Promise.all(days.map((d) => this.mensa.orderOptions(d.date, '').catch((e) => ({ error: e.message }))));
+    const orders = this.mensa.orders();
+    days.forEach((d, i) => {
+      const o = opts[i];
+      const stock = (o && o.stock) || {};
+      const hasStock = Object.keys(stock).length > 0;
+      const can = o && !o.error && o.orderable;
+      out.push(`\n## ${fmtDay(d.date)}${d.rel ? ` (${d.rel})` : ''} – ${o.error ? `Bestellstatus unbekannt: ${o.error}` : can ? 'vorbestellbar' : `nicht mehr vorbestellbar (wieder ab ${fmtDay(o.earliest)})`}`);
+      if (can) out.push(o.message ? `Abholzeiten: ${o.message}` : `Abholzeiten (Beginn, freie Plätze): ${o.slots.map((s) => `${s.time} (${s.free > 0 ? s.free : 'voll'})`).join(', ') || 'keine'}`);
+      for (const x of orders.filter((x) => x.date === d.date)) out.push(`Bereits bestellt (Nr. ${x.no}): ${x.items.map((it) => `${it.n}× ${it.title}`).join(', ')}, Abholung ${x.time} Uhr`);
+      for (const e of d.dishes) {
+        const diet = e.tags.filter((t) => t.diet).map((t) => t.text);
+        const allergens = e.tags.filter((t) => !t.diet).map((t) => t.text);
+        const s = e.aid && stock[e.aid];
+        const orderable = e.aid && (hasStock ? !!s : (e.prices.dhbw || e.prices.intern || 0) > 0);
+        const status = !can ? '' : !orderable ? ' · nicht vorbestellbar' : s && (s.rest <= 0 || s.live <= 0) ? ' · ausverkauft' : ` · vorbestellbar${s ? `, noch ${s.live}` : ''}`;
+        out.push(
+          `- ${e.aid ? `[dish_id ${e.aid}] ` : ''}${e.category ? e.category + ': ' : ''}${e.title}${e.description ? ` – ${e.description}` : ''}` +
+            `${diet.length ? ` · ${diet.join(', ')}` : ''}${allergens.length ? ` · Allergene/Zusätze: ${allergens.join(', ')}` : ''}` +
+            ` · DHBW ${fmtEuro(e.prices.dhbw)} (intern ${fmtEuro(e.prices.intern)}, extern ${fmtEuro(e.prices.extern)})${status}`,
+        );
+      }
+    });
+    return out.join('\n');
+  }
+
+  // Warenkorb vorbereiten – geprüft wie in der App, abgeschickt wird hier nichts
+  async prepareCart(input) {
+    if (!this.onPrepareCart) throw new Error('Mensa nicht verfügbar');
+    const { date, day, items, time } = await this.checkCart(input);
+    this.onPrepareCart({ date, items, time });
+    const lines = Object.entries(items).map(([aid, n]) => `${n}× ${day.dishes.find((x) => x.aid === aid).title}`);
+    return `Warenkorb für ${fmtDay(date)} vorbereitet: ${lines.join(', ')}${time ? `, Abholung ${time} Uhr` : ', Abholzeit noch nicht gewählt'}. ` +
+      'NOCH NICHT BESTELLT: Der Nutzer muss im Reiter Mensa Name/E-Mail prüfen, die Nutzungsvereinbarung bestätigen und selbst auf „Bestellen“ klicken. ' +
+      `Link für den Nutzer: [Warenkorb öffnen](mensa://${date})`;
+  }
+
+  // Verbindlich bestellen – nur nach Klick des Nutzers im Bestätigungsdialog der App
+  async placeOrder(input) {
+    if (!this.confirmOrder) throw new Error('Mensa nicht verfügbar');
+    if (!input.pickup_time) throw new Error('pickup_time fehlt – frag den Nutzer nach der Abholzeit.');
+    const { date, day, items, time, slot, termsUrl } = await this.checkCart(input);
+    const { first, last } = orderName(this.cache && this.cache.site);
+    if (!first || !last) throw new Error('Der Name ist unbekannt. Der Nutzer soll Vor- und Nachname einmal im Reiter Mensa eintragen.');
+    const given = String(input.email || '').trim();
+    const email = given || String(store.getSettings().mensaEmail || '').trim();
+    if (!email) throw new Error('Keine E-Mail-Adresse gespeichert – frag den Nutzer nach der E-Mail für den Abholschein.');
+    if (!EMAIL.test(email)) throw new Error(`„${email}“ ist keine gültige E-Mail-Adresse – frag nochmal nach.`);
+
+    const lines = Object.entries(items).map(([aid, n]) => {
+      const e = day.dishes.find((x) => x.aid === aid);
+      return { n, title: e.title, dhbw: e.prices.dhbw };
+    });
+    const ok = await this.confirmOrder({ date, label: fmtDay(date), time, until: slot.until, lines, firstName: first, lastName: last, email, termsUrl });
+    if (!ok) return 'NICHT BESTELLT: Der Nutzer hat die Bestellung im Bestätigungsdialog abgebrochen. Frag, was geändert werden soll.';
+
+    const entry = await this.mensa.order({ date, items, time, firstName: first, lastName: last, email });
+    // Erfragte Adresse für das nächste Mal merken
+    if (given && given !== store.getSettings().mensaEmail) store.setSettings({ mensaEmail: given });
+    if (this.onOrdered) this.onOrdered(entry);
+    return `BESTELLT – Bestellnummer ${entry.no}: ${lines.map((l) => `${l.n}× ${l.title}`).join(', ')} am ${fmtDay(date)}, Abholung ${entry.time}–${entry.until} Uhr. Der Abholschein kommt per E-Mail an ${entry.email}.`;
+  }
+
+  // Gemeinsame Prüfung für Warenkorb und Bestellung: Tag bestellbar, Gerichte vorbestellbar und vorrätig, Abholzeit frei
+  async checkCart(input) {
+    if (!this.mensa) throw new Error('Mensa nicht verfügbar');
+    const date = String(input.date || '');
+    if (!ISO_DATE.test(date)) throw new Error('date muss YYYY-MM-DD sein');
+    if (!Array.isArray(input.items) || !input.items.length) throw new Error('items ist leer');
+    const data = await this.mensa.get();
+    const day = data.days.find((d) => d.date === date);
+    if (!day) throw new Error(`Für ${fmtDay(date)} gibt es keinen Speiseplan.`);
+    const o = await this.mensa.orderOptions(date, '');
+    if (!o.orderable) throw new Error(`${fmtDay(date)} ist nicht mehr vorbestellbar (wieder ab ${fmtDay(o.earliest)}).`);
+    const hasStock = Object.keys(o.stock).length > 0;
+    const items = {};
+    for (const it of input.items) {
+      const aid = String((it && it.dish_id) || '');
+      const n = Math.floor(Number(it && it.quantity));
+      const e = day.dishes.find((x) => x.aid === aid);
+      if (!e) throw new Error(`dish_id ${aid} gibt es am ${fmtDay(date)} nicht.`);
+      if (!(n >= 1 && n <= 20)) throw new Error(`Menge für ${e.title} muss 1–20 sein.`);
+      const s = o.stock[aid];
+      if (hasStock ? !s : !(e.prices.dhbw || e.prices.intern)) throw new Error(`${e.title} kann nicht vorbestellt werden.`);
+      if (s && (s.rest <= 0 || s.live < n)) throw new Error(`${e.title}: nur noch ${Math.max(0, s.live)} verfügbar.`);
+      items[aid] = (items[aid] || 0) + n;
+    }
+    let slot = null;
+    if (input.pickup_time) {
+      slot = o.slots.find((s) => s.time === String(input.pickup_time).trim());
+      if (!slot) throw new Error(`Abholzeit ${input.pickup_time} gibt es nicht. Möglich: ${o.slots.map((s) => s.time).join(', ')}`);
+      if (slot.free <= 0) throw new Error(`Abholzeit ${slot.time} ist ausgebucht.`);
+    }
+    return { date, day, items, slot, time: slot ? slot.time : null, termsUrl: o.termsUrl };
   }
 
   // Angehängte Dateien als Inhalt für die erste Nachricht
