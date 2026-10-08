@@ -29,6 +29,7 @@ const S = {
     settingsTab: 'sync',
   },
   login: { step: 'site', site: null, error: '', busy: false },
+  gate: { busy: false, error: '' },
   chats: { claude: newChat(), chatgpt: newChat() },
   chatgpt: null,
   gptModels: null,
@@ -176,6 +177,15 @@ async function boot() {
   if (S.state.loggedIn) S.data = await api.data();
   render();
 
+  // Desktop: Passkey-Sitzung beendet oder vom Admin widerrufen → Sperrbildschirm
+  if (!WEB) api.onGateStatus(async (st) => {
+    if (st.signedIn || !S.state.gate || !S.state.gate.signedIn) return;
+    closeModal();
+    S.state = await api.state();
+    S.data = null;
+    render();
+  });
+
   api.onSyncStatus((st) => { S.status = st; renderSyncPill(); });
   api.onDataUpdated(async () => { S.data = await api.data(); renderNav(); renderLeft(); renderMain(); });
   api.onFilesUpdated(async () => { S.data = await api.data(); if (['course', 'module', 'dashboard'].includes(S.route.name)) renderMain(); });
@@ -249,6 +259,10 @@ async function boot() {
 
 function render() {
   const app = $('#app');
+  if (!WEB && S.state.gate && !S.state.gate.signedIn) {
+    app.innerHTML = renderGate();
+    return;
+  }
   if (!S.state.loggedIn) {
     app.innerHTML = renderLogin();
     return;
@@ -294,6 +308,26 @@ function renderUpdateBanner() {
 }
 
 // ---------- Login ----------
+// Desktop: Zugang nur mit Passkey, wie auf der Website (Anmeldung im Standardbrowser)
+function renderGate() {
+  const G = S.gate;
+  return `
+    <div class="login">
+      <div class="login-card">
+        <div class="login-brand">
+          <div class="brand-mark">${icon('graduation')}</div>
+          <div><h1>Chadoodle</h1><div class="sub">Anmelden, um fortzufahren</div></div>
+        </div>
+        ${G.error ? `<div class="error">${esc(G.error)}</div>` : ''}
+        ${G.busy
+          ? `<button class="btn primary block" disabled>${icon('refresh', 'spin')} Warte auf den Passkey im Browser…</button>
+             <button class="btn ghost block" style="margin-top:8px" data-action="gate-cancel">Abbrechen</button>`
+          : `<button class="btn primary block" data-action="gate-login">🔑 Mit Passkey anmelden</button>`}
+        <div class="login-foot">Chadoodle ist derzeit nur auf Einladung zugänglich. Die Anmeldung öffnet sich in deinem Browser – mit demselben Passkey wie auf chadoodle.romanbenz.com. Den Einladungslink bekommst du vom Admin.</div>
+      </div>
+    </div>`;
+}
+
 function renderLogin() {
   const L = S.login;
   const s = L.site;
@@ -1619,6 +1653,7 @@ function renderSettings() {
     body = `<div class="card"><div class="card-head"><h2>Konto</h2></div><div class="card-body">
       <div class="dd-user" style="padding:6px 0 14px"><div class="avatar" style="width:52px;height:52px">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</div><div><b style="font-size:16px">${esc(site.fullname)}</b><div class="muted small">${esc(site.sitename)} · ${esc(site.url)}</div><div class="muted small">Moodle ${esc(site.release || '')}</div></div></div>
       ${row('Abmelden', 'Entfernt das Zugriffstoken; lokale Dateien bleiben auf Wunsch erhalten', '<button class="btn sm danger" data-action="logout">Abmelden</button>')}
+      ${!WEB && S.state.gate ? row('Passkey-Zugang', `Angemeldet als <b>${esc((S.state.gate.user || {}).name || '–')}</b>. Abmelden sperrt die App auf diesem Computer bis zur nächsten Anmeldung mit Passkey; Moodle-Anmeldung und Dateien bleiben erhalten.`, `${S.state.gate.user && S.state.gate.user.isAdmin ? `<button class="btn sm" data-action="external" data-url="${esc(S.state.gate.base)}/admin">${icon('users', 'sm')} Admin-Dashboard</button>` : ''}<button class="btn sm ghost" data-action="gate-logout">Abmelden</button>`) : ''}
       ${WEB ? row('Web-Zugang', `${S.state.webUser ? `Mit Passkey angemeldet als <b>${esc(S.state.webUser.name)}</b>. ` : ''}Abmelden meldet nur diesen Browser ab, deine Daten hier bleiben erhalten.`, `${S.state.webUser && S.state.webUser.isAdmin ? `<button class="btn sm" data-action="external" data-url="${location.origin}/admin">${icon('users', 'sm')} Admin-Dashboard</button>` : ''}<button class="btn sm ghost" data-action="gate-logout">Abmelden</button>`) : ''}
       ${row('Version', 'Chadoodle', `<span class="muted">${esc(S.state.version)}</span>`)}
     </div></div>
@@ -2485,7 +2520,28 @@ const actions = {
     applyTheme(el.dataset.v);
     renderMain();
   },
-  'gate-logout': () => api.gateLogout(),
+  'gate-logout': async () => {
+    await api.gateLogout();
+    if (WEB) return;
+    S.state = await api.state();
+    S.data = null;
+    render();
+  },
+  'gate-login': async () => {
+    S.gate = { busy: true, error: '' };
+    render();
+    try {
+      await api.gateLogin();
+      S.gate = { busy: false, error: '' };
+      S.state = await api.state();
+      if (S.state.loggedIn) S.data = await api.data();
+    } catch (e) {
+      const msg = cleanErr(e);
+      S.gate = { busy: false, error: /abgebrochen/.test(msg) ? '' : msg };
+    }
+    render();
+  },
+  'gate-cancel': () => api.gateCancel(),
   'account-connect': () => accountRun(() => api.accountConnect(), 'Mit dem Chadoodle-Konto verbunden'),
   'account-sync': () => accountRun(() => api.accountSync()),
   'account-disconnect': () => accountRun(() => api.accountDisconnect(), 'Dieses Gerät gleicht nicht mehr ab'),

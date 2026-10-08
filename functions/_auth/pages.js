@@ -102,12 +102,12 @@ async function createPasskey(start) {
   const cred = await navigator.credentials.create({ publicKey });
   return api('/api/auth/register/verify', { challengeId, response: credJSON(cred), label: deviceLabel() });
 }
-async function usePasskey() {
+async function usePasskey(verifyPath = '/api/auth/login/verify', extra = {}) {
   if (!window.PublicKeyCredential) throw new Error('Dieser Browser unterstützt keine Passkeys.');
   const { challengeId, options: o } = await api('/api/auth/login/options', {});
   const publicKey = { ...o, challenge: b64d(o.challenge), allowCredentials: (o.allowCredentials || []).map((c) => ({ ...c, id: b64d(c.id) })) };
   const cred = await navigator.credentials.get({ publicKey });
-  return api('/api/auth/login/verify', { challengeId, response: credJSON(cred) });
+  return api(verifyPath, { ...extra, challengeId, response: credJSON(cred) });
 }
 function deviceLabel() {
   const ua = navigator.userAgent;
@@ -131,6 +131,35 @@ export function loginPage(nonce) {
     try { await usePasskey(); location.replace(location.pathname === '/admin' ? '/admin' : '/'); }
     catch (e) { msg(passkeyError(e)); }
     finally { $('go').disabled = false; }
+  });`);
+}
+
+// Anmeldung der Desktop-App: Die App öffnet diese Seite im Standardbrowser (#port=…&state=…&challenge=…).
+// Nach dem Passkey geht ein Einmal-Code an den lokalen Rückruf der App (127.0.0.1), nirgendwo sonst hin.
+export function appLoginPage(nonce) {
+  return page(nonce, 'Chadoodle – App anmelden', `<main class="center"><div class="card narrow">
+    ${brand('Desktop-App anmelden')}
+    <div id="ok" hidden>
+      <p style="margin:0 0 6px">Melde die Chadoodle-App auf diesem Computer mit deinem Passkey an.</p>
+      <button class="primary block" id="go">🔑 Mit Passkey anmelden</button>
+    </div>
+    <div class="msg" id="msg" role="status"></div>
+    <p class="muted" style="margin:18px 0 0">Noch kein Passkey? Den Einladungslink bekommst du vom Admin.</p>
+  </div></main>`, `
+  const p = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, '', '/app-login');
+  const port = Number(p.get('port'));
+  const state = p.get('state') || '';
+  const challenge = p.get('challenge') || '';
+  if (!(port >= 1024 && port <= 65535) || !/^[A-Za-z0-9_-]{16,100}$/.test(state) || !/^[A-Za-z0-9_-]{43}$/.test(challenge)) msg('Dieser Link ist unvollständig. Bitte die Anmeldung in der App neu starten.');
+  else $('ok').hidden = false;
+  $('go').addEventListener('click', async () => {
+    $('go').disabled = true; msg('');
+    try {
+      const { code } = await usePasskey('/api/auth/app/verify', { codeChallenge: challenge });
+      msg('Angemeldet – zurück zur App …', 'ok');
+      location.replace('http://127.0.0.1:' + port + '/callback?' + new URLSearchParams({ code, state }));
+    } catch (e) { msg(passkeyError(e)); $('go').disabled = false; }
   });`);
 }
 

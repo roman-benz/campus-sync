@@ -32,6 +32,7 @@ const { Updater } = require('./updater');
 const { Timetables, RAPLA_TEMPLATE } = require('./timetable');
 const { Mensa, DEFAULT_URL: MENSA_DEFAULT } = require('./mensa');
 const { Account } = require('./account');
+const { WebAccess } = require('./web-access');
 
 const ICON = path.join(__dirname, '..', '..', 'build', 'icon.png');
 const APP_NAME = 'Chadoodle';
@@ -54,6 +55,8 @@ const aiTools = new AiTools(sync, docIndex);
 const timetables = new Timetables();
 const mensa = new Mensa();
 const account = new Account(mensa);
+// Zugang zur App nur mit Passkey (wie auf der Website)
+const webAccess = new WebAccess();
 aiTools.timetables = timetables;
 aiTools.mensa = mensa;
 aiTools.onPrepareCart = (cart) => send('mensa:prepare', cart);
@@ -157,6 +160,24 @@ function showWindow() {
   const interval = Math.max(5, Number(store.getSettings().syncIntervalMin) || 30) * 60 * 1000;
   if (sync.client && sync.cache && Date.now() - sync.cache.lastSync > interval) sync.run();
   account.pull();
+  checkAccess();
+}
+
+// Passkey-Sitzung prüfen (höchstens alle 10 Min.); vom Admin widerrufen → App sperren
+let lastAccessCheck = 0;
+async function checkAccess(force = false) {
+  if (!webAccess.signedIn || (!force && Date.now() - lastAccessCheck < 10 * 60 * 1000)) return;
+  lastAccessCheck = Date.now();
+  if (!(await webAccess.check())) lockApp();
+}
+
+// Sync anhalten; Moodle-Anmeldung und Dateien bleiben, nach der nächsten Passkey-Anmeldung geht es weiter
+function lockApp() {
+  if (sync.client) {
+    sync.save();
+    sync.detach();
+  }
+  send('gate:status', webAccess.status());
 }
 
 function createTray() {
@@ -236,6 +257,7 @@ function applyLoginItem() {
 }
 
 function startSession() {
+  if (!webAccess.signedIn) return false;
   const s = store.getSettings();
   const token = store.getSecret('moodleToken');
   if (!token || !s.siteUrl) return false;
@@ -289,6 +311,7 @@ function removeEmptyDirs(dir) {
 // ---------- IPC ----------
 function registerIpc() {
   ipcMain.handle('app:state', () => ({
+    gate: webAccess.status(),
     loggedIn: !!sync.client,
     settings: store.getSettings(),
     hasClaudeKey: !!store.getSecret('anthropicKey') || !!process.env.ANTHROPIC_API_KEY,
@@ -299,7 +322,22 @@ function registerIpc() {
     index: sync.client ? docIndex.status() : null,
     status: sync.status,
   }));
-  ipcMain.handle('data:get', () => sync.cache);
+  ipcMain.handle('data:get', () => (webAccess.signedIn ? sync.cache : null));
+
+  // Passkey-Zugang zur App
+  ipcMain.handle('gate:login', async () => {
+    const st = await webAccess.login();
+    lastAccessCheck = Date.now();
+    if (startSession()) setTimeout(() => docIndex.indexPending(), 8000);
+    showWindow();
+    return st;
+  });
+  ipcMain.handle('gate:cancel', () => webAccess.cancel());
+  ipcMain.handle('gate:logout', async () => {
+    await webAccess.logout();
+    lockApp();
+    return webAccess.status();
+  });
 
   ipcMain.handle('auth:check-site', async (_e, url) => {
     const cfg = await getPublicConfig(url);
@@ -313,6 +351,7 @@ function registerIpc() {
   });
 
   ipcMain.handle('auth:login', async (_e, { siteUrl, username, password, sso }) => {
+    if (!webAccess.signedIn) throw new Error('Bitte zuerst mit Passkey anmelden.');
     const site = normalizeSite(siteUrl);
     const result = sso ? await loginWithBrowser(site, win) : await loginWithPassword(site, username, password);
     store.setSettings({ siteUrl: site });
@@ -537,14 +576,18 @@ app.whenReady().then(() => {
     sync.run();
     updater.check();
     chatgptAuth.keepAlive();
+    checkAccess(true);
   }, 15000));
+  setInterval(() => checkAccess(true), 6 * 60 * 60 * 1000);
 
   // ChatGPT-Anmeldung regelmäßig erneuern, damit man sich nicht neu anmelden muss
   setTimeout(() => chatgptAuth.keepAlive(), 60 * 1000);
   setInterval(() => chatgptAuth.keepAlive(), 6 * 60 * 60 * 1000);
 
+  // Mit gespeicherter Passkey-Sitzung sofort loslegen (auch offline); geprüft wird im Hintergrund
   const loggedIn = startSession();
   if (loggedIn) setTimeout(() => docIndex.indexPending(), 8000);
+  checkAccess(true);
   // Autostart ohne Anmeldung ergibt keinen Sinn – dann gar nicht erst im Hintergrund bleiben
   if (startHidden && !loggedIn) app.quit();
 });
