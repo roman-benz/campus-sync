@@ -237,6 +237,7 @@ const handlers = {
     settings: { ...store.getSettings(), aiProvider: 'claude' },
     hasClaudeKey: !!store.getSecret('anthropicKey'),
     account: account.status,
+    webUser,
     version: VERSION,
     update: { state: 'web' },
     chatgpt: CHATGPT_OFF,
@@ -385,10 +386,10 @@ const handlers = {
     return true;
   },
 
-  // Zugangs-Cookie der Website löschen (functions/api/gate.js) → Login-Seite
+  // Passkey-Sitzung der Website beenden (functions/api/auth) → Login-Seite
   async gateLogout() {
     await vfs.flush();
-    await nativeFetch('/api/gate', { method: 'DELETE' }).catch(() => {});
+    await nativeFetch('/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
     location.reload();
   },
   updateStatus: () => ({ state: 'web' }),
@@ -432,7 +433,17 @@ function acquireLock() {
   });
 }
 
+// Angemeldeter Nutzer der Website (Passkey); lokal ohne Pages Functions: null
+let webUser = null;
+async function loadWebUser() {
+  try {
+    const res = await nativeFetch('/api/auth/me', { headers: { Accept: 'application/json' } });
+    if (res.ok && (res.headers.get('content-type') || '').includes('json')) webUser = (await res.json()).user;
+  } catch {}
+}
+
 const ready = (async () => {
+  loadWebUser();
   await acquireLock();
   await vfs.init();
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});

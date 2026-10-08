@@ -1,28 +1,24 @@
-// Zugangsschutz für die ganze Website: Ohne gültiges Zugangs-Cookie gibt es nur die Login-Seite.
-// Gilt für alles (App-Dateien, Proxy, Service Worker) – außer dem Login selbst und dem Icon.
-import { verify } from './_gate/cookie.js';
-import { gatePage } from './_gate/page.js';
+// Zugangsschutz für die ganze Website: Ohne gültige Passkey-Sitzung gibt es nur die Login-Seite.
+// Gilt für alles (App-Dateien, Proxy, Service Worker) – außer Login, Einladungen und dem Icon.
+import { getSession, MAIN_HOST } from './_auth/lib.js';
+import { loginPage, securityHeaders, newNonce } from './_auth/pages.js';
 
-const OPEN = new Set(['/api/gate', '/icon.png']);
+const OPEN = (p) => p === '/icon.png' || p === '/einladung' || p.startsWith('/api/auth/');
 
-export async function onRequest({ request, env, next }) {
+export async function onRequest(context) {
+  const { request, env, next } = context;
   const url = new URL(request.url);
-  if (OPEN.has(url.pathname)) return next();
-  // Ohne Secret lieber geschlossen bleiben als offen
-  if (env.GATE_SECRET && (await verify(request.headers.get('cookie'), env.GATE_SECRET))) return next();
+  // Passkeys gelten nur für die Hauptdomain: *.pages.dev dorthin umleiten
+  if (url.hostname.endsWith('.pages.dev')) return Response.redirect(`https://${MAIN_HOST}${url.pathname}${url.search}`, 301);
+  if (OPEN(url.pathname)) return next();
 
-  const page = request.method === 'GET' && (request.headers.get('sec-fetch-mode') === 'navigate' || (request.headers.get('accept') || '').includes('text/html'));
-  if (!page) return new Response('Anmeldung erforderlich', { status: 401, headers: { 'Cache-Control': 'no-store', 'Content-Type': 'text/plain; charset=utf-8' } });
-  const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
-  return new Response(gatePage(nonce), {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-store',
-      'X-Frame-Options': 'DENY',
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy': 'no-referrer',
-      'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src 'self'; connect-src 'self' https://btqpwjireatmmiyihnei.supabase.co; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
-    },
-  });
+  const session = await getSession(request, env).catch(() => null);
+  if (session) {
+    context.data.session = session;
+    return next();
+  }
+  const navigate = request.method === 'GET' && (request.headers.get('sec-fetch-mode') === 'navigate' || (request.headers.get('accept') || '').includes('text/html'));
+  if (!navigate) return new Response('Anmeldung erforderlich', { status: 401, headers: { 'Cache-Control': 'no-store', 'Content-Type': 'text/plain; charset=utf-8' } });
+  const nonce = newNonce();
+  return new Response(loginPage(nonce), { headers: securityHeaders(nonce) });
 }

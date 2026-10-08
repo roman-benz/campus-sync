@@ -1619,7 +1619,7 @@ function renderSettings() {
     body = `<div class="card"><div class="card-head"><h2>Konto</h2></div><div class="card-body">
       <div class="dd-user" style="padding:6px 0 14px"><div class="avatar" style="width:52px;height:52px">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</div><div><b style="font-size:16px">${esc(site.fullname)}</b><div class="muted small">${esc(site.sitename)} · ${esc(site.url)}</div><div class="muted small">Moodle ${esc(site.release || '')}</div></div></div>
       ${row('Abmelden', 'Entfernt das Zugriffstoken; lokale Dateien bleiben auf Wunsch erhalten', '<button class="btn sm danger" data-action="logout">Abmelden</button>')}
-      ${WEB ? row('Web-Zugang', 'Meldet diesen Browser von chadoodle.romanbenz.com ab (deine Daten hier bleiben erhalten)', '<button class="btn sm ghost" data-action="gate-logout">Abmelden</button>') : ''}
+      ${WEB ? row('Web-Zugang', `${S.state.webUser ? `Mit Passkey angemeldet als <b>${esc(S.state.webUser.name)}</b>. ` : ''}Abmelden meldet nur diesen Browser ab, deine Daten hier bleiben erhalten.`, `${S.state.webUser && S.state.webUser.isAdmin ? `<button class="btn sm" data-action="external" data-url="${location.origin}/admin">${icon('users', 'sm')} Admin-Dashboard</button>` : ''}<button class="btn sm ghost" data-action="gate-logout">Abmelden</button>`) : ''}
       ${row('Version', 'Chadoodle', `<span class="muted">${esc(S.state.version)}</span>`)}
     </div></div>
     ${accountCard(row, sw)}`;
