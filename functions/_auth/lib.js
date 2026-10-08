@@ -14,6 +14,7 @@ export async function sha256(s) {
   const d = await crypto.subtle.digest('SHA-256', enc.encode(s));
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
+export const sha256B64url = async (s) => b64url(await crypto.subtle.digest('SHA-256', enc.encode(s)));
 export const now = () => Math.floor(Date.now() / 1000);
 
 // Passkeys gehören fest zu einer Domain (RP-ID). Nur die Hauptdomain und localhost (Entwicklung).
@@ -47,8 +48,14 @@ const sessionCookie = (value, maxAge) => `${SESSION_COOKIE}=${value}; Path=/; Ma
 const cache = new Map();
 const CACHE_MS = 30 * 1000;
 
+// Desktop-App: Sitzungstoken im Authorization-Header statt im Cookie
+export const bearer = (request) => {
+  const m = /^Bearer ([A-Za-z0-9_-]{20,100})$/.exec(request.headers.get('authorization') || '');
+  return m ? m[1] : null;
+};
+
 export async function getSession(request, env) {
-  const token = cookieValue(request, SESSION_COOKIE);
+  const token = bearer(request) || cookieValue(request, SESSION_COOKIE);
   if (!token || !env.AUTH_DB) return null;
   const hash = await sha256(token);
   const hit = cache.get(hash);
@@ -63,6 +70,10 @@ export async function getSession(request, env) {
 }
 
 export async function createSession(env, userId) {
+  return sessionCookie(await createSessionToken(env, userId), SESSION_DAYS * 86400);
+}
+
+export async function createSessionToken(env, userId) {
   const token = randomToken();
   const t = now();
   await env.AUTH_DB.batch([
@@ -71,7 +82,7 @@ export async function createSession(env, userId) {
     env.AUTH_DB.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(t),
     env.AUTH_DB.prepare('DELETE FROM challenges WHERE expires_at < ?').bind(t),
   ]);
-  return sessionCookie(token, SESSION_DAYS * 86400);
+  return token;
 }
 
 export async function endSession(request, env) {

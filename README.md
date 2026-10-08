@@ -37,6 +37,7 @@ Voraussetzung: Die Moodle-Seite muss die Schnittstelle der offiziellen Moodle-Ap
 Unter **[chadoodle.romanbenz.com](https://chadoodle.romanbenz.com)** läuft dieselbe App im Browser, ohne Installation. Oberfläche und Logik sind identisch mit der Desktop-App; alles läuft lokal im Browser:
 
 - **Zugang nur auf Einladung, Anmeldung mit Passkey:** Ohne Passkey-Sitzung liefert die Pages-Middleware (`functions/_middleware.js`) nur die Login-Seite aus. Neue Nutzer kommen über Einladungslinks aus dem Admin-Dashboard unter `/admin` dazu: Link erzeugen, verschicken, der Empfänger richtet damit seinen Passkey ein. Nutzer, Passkeys, Einladungen und Sitzungen liegen in der Cloudflare-D1-Datenbank `chadoodle-auth` (Binding `AUTH_DB`, Schema in `d1/migrations`).
+- **Desktop-App mit demselben Passkey:** Auch die Windows-App startet erst nach der Anmeldung mit Passkey. „Mit Passkey anmelden“ öffnet `/app-login` im Standardbrowser; nach dem Passkey bekommt die App über einen Rückruf an `127.0.0.1` einen Einmal-Code und tauscht ihn (PKCE) gegen ein Sitzungstoken, das verschlüsselt gespeichert wird. Die Sitzung erscheint im Admin-Dashboard; „Überall abmelden“ oder das Löschen des Nutzers sperrt auch die App. Ohne Internet bleibt eine angemeldete App nutzbar.
 
 - Kursdaten, Dateien, Volltextindex und Einstellungen liegen im Browser-Speicher (IndexedDB) und sind offline verfügbar. Es gibt keinen Server, der deine Daten oder dein Moodle-Token sieht.
 - Synchronisiert wird, solange der Tab offen ist. Benachrichtigungen kommen als Browser-Hinweise.
@@ -96,6 +97,7 @@ Die Web-Version wird bei jedem Push auf `main` automatisch von Cloudflare Pages 
 | `functions/api/proxy.js` | Pages Function für Rapla und die Mensa-Bestellung |
 | `functions/_middleware.js`, `functions/_auth/*` | Zugangsschutz der Website: Passkey-Sitzung prüfen, Login-, Einladungs- und Admin-Seiten |
 | `functions/api/auth`, `functions/api/admin` | Passkey-Anmeldung (WebAuthn) und Admin-API (Einladungen, Nutzer, Passkeys) |
+| `src/main/web-access.js`, `functions/app-login.js` | Passkey-Zugang der Desktop-App (Anmeldung im Browser, Rückruf an die App) |
 | `src/main/account.js` | Chadoodle-Konto: Abgleich von Einstellungen, Mensa-Bestellungen und API-Key (Supabase, Realtime) |
 | `supabase/functions/account` | Edge Function: Moodle-Token prüfen, Konto anlegen/finden, Sitzung ausstellen, Konto löschen |
 

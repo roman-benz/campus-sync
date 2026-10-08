@@ -1,9 +1,9 @@
 // Zugangsschutz für die ganze Website: Ohne gültige Passkey-Sitzung gibt es nur die Login-Seite.
-// Gilt für alles (App-Dateien, Proxy, Service Worker) – außer Login, Einladungen und dem Icon.
+// Gilt für alles (App-Dateien, Proxy, Service Worker) – außer Login, Einladungen, Anmeldung der Desktop-App und dem Icon.
 import { getSession, MAIN_HOST } from './_auth/lib.js';
 import { loginPage, securityHeaders, newNonce } from './_auth/pages.js';
 
-const OPEN = (p) => p === '/icon.png' || p === '/einladung' || p.startsWith('/api/auth/');
+const OPEN = (p) => p === '/icon.png' || p === '/einladung' || p === '/app-login' || p.startsWith('/api/auth/');
 
 export async function onRequest(context) {
   const { request, env, next } = context;
