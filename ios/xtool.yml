@@ -1,0 +1,4 @@
+version: 1
+bundleID: de.rbenz.chadoodle
+infoPath: Info.plist
+iconPath: Resources/AppIcon.png
