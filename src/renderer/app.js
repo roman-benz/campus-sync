@@ -491,7 +491,7 @@ function renderNav() {
     <div class="spacer"></div>
     <div id="sync-pill-wrap"></div>
     <button class="icon-btn" data-action="dropdown" data-dd="notif" title="Mitteilungen">${icon('bell')}${unread ? `<span class="badge-dot">${unread > 99 ? '99+' : unread}</span>` : ''}</button>
-    <button class="claude-toggle ${S.ui.claudeOpen ? 'active' : ''}" data-action="toggle-claude" title="KI-Lernassistent (Strg+K)">${icon('sparkles')} Assistent</button>
+    <button class="claude-toggle ${S.ui.claudeOpen ? 'active' : ''}" data-action="toggle-claude" title="KI-Lernassistent (Strg+K)" aria-label="KI-Lernassistent">${icon('sparkles')}<span>Assistent</span></button>
     <button class="avatar" data-action="dropdown" data-dd="user" title="${esc(site.fullname)}">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</button>
     ${S.ui.dropdown ? renderDropdown() : ''}`;
   renderSyncPill();
