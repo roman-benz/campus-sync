@@ -53,6 +53,8 @@ fs.writeFileSync(path.join(out, 'viewer.js'), fs.readFileSync(r('src/renderer/vi
 // ---------- Bibliotheken ----------
 const copy = (from, to = from) => fs.cpSync(r('node_modules', from), path.join(out, 'vendor', to), { recursive: true });
 copy('katex/dist');
+copy('@fontsource-variable/inter/opsz.css');
+copy('@fontsource-variable/inter/files');
 copy('marked/lib/marked.umd.js');
 copy('dompurify/dist/purify.min.js');
 for (const f of ['pdf.mjs', 'pdf.worker.mjs']) copy(`pdfjs-dist/build/${f}`);

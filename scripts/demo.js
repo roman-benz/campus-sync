@@ -49,6 +49,13 @@ function seed() {
   store.setSettings({ siteUrl: SITE, downloadDir, syncIntervalMin: 240, notifications: false, runInBackground: false, aiProvider: 'claude' });
   store.setSecret('moodleToken', 'demo-token');
   store.setSecret('anthropicKey', 'sk-ant-demo-nur-anzeige');
+  // Passkey-Zugang vortäuschen; die Prüfung beim Server beantwortet der fetch-Stub unten
+  const demoUser = { name: 'Demo', isAdmin: false };
+  store.setSecret('webSession', JSON.stringify({ token: 'demo', user: demoUser }));
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (url, opts) => (String(url).endsWith('/api/auth/me')
+    ? Promise.resolve(new Response(JSON.stringify({ user: demoUser }), { headers: { 'Content-Type': 'application/json' } }))
+    : realFetch(url, opts));
 
   const now = Math.floor(Date.now() / 1000);
   const day = 86400;
