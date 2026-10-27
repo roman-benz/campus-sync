@@ -58,7 +58,7 @@ export async function openPdf(host, { data, page = 1, zoom = 'fit', terms = [], 
   layout();
 
   async function render(p) {
-    if (destroyed || p.rendered === scale || p.task) return;
+    if (destroyed || zooming || p.rendered === scale || p.task) return;
     const target = scale;
     p.task = (async () => {
       const pg = await doc.getPage(p.n);
@@ -141,47 +141,102 @@ export async function openPdf(host, { data, page = 1, zoom = 'fit', terms = [], 
   let renderTimer = null;
   let zoomMode = zoom;
 
+  // Zoom läuft über requestAnimationFrame: höchstens ein Layout pro Frame, die Textebene ist
+  // währenddessen ausgeblendet, und die Seiten werden erst nach dem Zoomen scharf neu gerendert.
+  let zooming = false;
+  let zoomFrame = 0;
+  let zoomTarget = scale;
+  let zoomPoint = null;
+  let zoomAnim = null;
+  let zoomAnchor = null;
+
   // Neu rendern erst, wenn das Zoomen kurz pausiert – bis dahin wird das alte Bild skaliert
   function scheduleRender() {
     clearTimeout(renderTimer);
-    renderTimer = setTimeout(() => pages.forEach((p) => isNear(p) && render(p)), 160);
+    renderTimer = setTimeout(() => {
+      zooming = false;
+      zoomAnchor = null;
+      wrap.classList.remove('zooming');
+      pages.forEach((p) => isNear(p) && render(p));
+    }, 160);
   }
 
-  // Zoomen um einen Bildschirmpunkt: die Stelle unter dem Mauszeiger bleibt stehen
-  function zoomAt(z, cx, cy) {
-    const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, z));
-    if (Math.abs(next - scale) < 0.001) return;
-    const sr = scroller.getBoundingClientRect();
-    if (cx == null) { cx = sr.left + sr.width / 2; cy = sr.top + sr.height / 2; }
-    let anchor = null;
-    for (const p of pages) {
-      const r = p.el.getBoundingClientRect();
-      if (cy <= r.bottom + 14) { anchor = { p, fx: (cx - r.left) / r.width, fy: (cy - r.top) / r.height }; break; }
+  // Merkt sich, welche Stelle welcher Seite unter dem Bildschirmpunkt liegt
+  function anchorAt(cx, cy) {
+    let p = pages[pages.length - 1];
+    for (const q of pages) if (cy <= q.el.getBoundingClientRect().bottom + 7) { p = q; break; }
+    const r = p.el.getBoundingClientRect();
+    return { el: p.el, cx, cy, fx: (cx - r.left) / r.width, fy: (cy - r.top) / r.height };
+  }
+
+  // Skala setzen und so scrollen, dass die Stelle unter dem Zoompunkt exakt stehen bleibt
+  function applyScale(next) {
+    const { cx, cy } = zoomPoint;
+    let a = zoomAnchor && zoomAnchor.cx === cx && zoomAnchor.cy === cy ? zoomAnchor : null;
+    if (a) {
+      const r = a.el.getBoundingClientRect();
+      if (Math.abs(r.top + a.fy * r.height - cy) > 2) a = null; // zwischendurch gescrollt
+      // waagerecht kann die Zentrierung schmaler Seiten den Punkt verschieben
+      else if (Math.abs(r.left + a.fx * r.width - cx) > 2) a.fx = (cx - r.left) / r.width;
     }
-    zoomMode = 'custom';
+    if (!a) a = zoomAnchor = anchorAt(cx, cy);
     scale = next;
     layout();
-    if (anchor) {
-      const el = anchor.p.el;
-      scroller.scrollTop = el.offsetTop + anchor.fy * el.offsetHeight - (cy - sr.top);
-      scroller.scrollLeft = el.offsetLeft + anchor.fx * el.offsetWidth - (cx - sr.left);
-    }
-    scheduleRender();
+    const r = a.el.getBoundingClientRect();
+    scroller.scrollLeft += r.left + a.fx * r.width - cx;
+    scroller.scrollTop += r.top + a.fy * r.height - cy;
     onZoom && onZoom(scale);
   }
 
-  // Strg + Mausrad bzw. Touchpad-Pinch (kommt als wheel mit ctrlKey)
+  function zoomTick(now) {
+    zoomFrame = 0;
+    let next = zoomTarget;
+    if (zoomAnim) {
+      const t = Math.max(0, Math.min(1, (now - zoomAnim.t0) / zoomAnim.dur));
+      const e = 1 - Math.pow(1 - t, 3);
+      // logarithmisch interpolieren, damit Vergrößern und Verkleinern gleich schnell wirken
+      next = zoomAnim.from * Math.pow(zoomTarget / zoomAnim.from, e);
+      if (t < 1) zoomFrame = requestAnimationFrame(zoomTick);
+      else zoomAnim = null;
+    }
+    if (Math.abs(next - scale) > 1e-4) applyScale(next);
+    scheduleRender();
+  }
+
+  // Zoomen um einen Bildschirmpunkt (ohne Punkt: Mitte der Ansicht)
+  function zoomTo(z, cx, cy, animate) {
+    zoomTarget = Math.max(MIN_SCALE, Math.min(MAX_SCALE, z));
+    if (cx == null) {
+      const sr = scroller.getBoundingClientRect();
+      cx = sr.left + sr.width / 2;
+      cy = sr.top + sr.height / 2;
+    }
+    zoomPoint = { cx, cy };
+    // t0 einen Frame vorverlegt: schon der erste Frame bewegt sich, auch wenn eine Raste eine laufende Animation ablöst
+    zoomAnim = animate ? { from: scale, t0: performance.now() - 16, dur: 220 } : null;
+    if (!zooming) {
+      zooming = true;
+      wrap.classList.add('zooming');
+    }
+    clearTimeout(renderTimer);
+    if (!zoomFrame) zoomFrame = requestAnimationFrame(zoomTick);
+  }
+
+  // Strg + Mausrad bzw. Touchpad-Pinch (kommt als wheel mit ctrlKey). Mausrad-Rasten werden
+  // weich animiert, die feinen Pinch-Schritte direkt umgesetzt; beides addiert sich zum Ziel.
   function onWheel(e) {
     if (!e.ctrlKey) return;
     e.preventDefault();
     const step = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
-    zoomAt(scale * Math.exp(-step * 0.0018), e.clientX, e.clientY);
+    const from = zoomFrame ? zoomTarget : scale;
+    zoomMode = 'custom';
+    zoomTo(from * Math.exp(-step * 0.0018), e.clientX, e.clientY, Math.abs(step) >= 40);
   }
   scroller.addEventListener('wheel', onWheel, { passive: false });
   const ro = new ResizeObserver(() => {
-    if (zoomMode !== 'fit') return;
+    if (zoomMode !== 'fit' || !scroller.clientWidth) return;
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => api.setZoom('fit'), 150);
+    resizeTimer = setTimeout(() => api.setZoom('fit', false), 150);
   });
   ro.observe(scroller);
 
@@ -196,18 +251,14 @@ export async function openPdf(host, { data, page = 1, zoom = 'fit', terms = [], 
       onPage && onPage(current, doc.numPages);
     },
     zoomBy(f) {
-      zoomAt(scale * f);
-      return scale;
+      zoomMode = 'custom';
+      zoomTo((zoomFrame ? zoomTarget : scale) * f, null, null, true);
+      return zoomTarget;
     },
-    setZoom(z) {
+    setZoom(z, animate = true) {
       zoomMode = z;
-      const keep = current;
-      setScale(z);
-      layout();
-      pages.forEach((p) => isNear(p) && render(p));
-      api.goTo(keep);
-      onZoom && onZoom(scale);
-      return scale;
+      zoomTo(z === 'fit' ? fitScale() : z, null, null, animate);
+      return zoomTarget;
     },
     highlight(terms) {
       hlTerms = (terms || []).map(norm).filter(Boolean);
@@ -220,6 +271,8 @@ export async function openPdf(host, { data, page = 1, zoom = 'fit', terms = [], 
       scroller.removeEventListener('scroll', onScroll);
       scroller.removeEventListener('wheel', onWheel);
       clearTimeout(renderTimer);
+      clearTimeout(resizeTimer);
+      cancelAnimationFrame(zoomFrame);
       task.destroy();
     },
   };

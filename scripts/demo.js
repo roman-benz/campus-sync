@@ -180,7 +180,7 @@ async function shots() {
   await snap('04-aufgabe');
   await run(`document.querySelector('[data-action=toggle-claude]').click()`);
   await snap('05-claude');
-  await run(`document.querySelector('.crumbs [data-action=course]').click()`);
+  await run(`document.querySelector('.page-top [data-action=course]').click()`);
   await run(`document.querySelector('[data-action=course-tab][data-v=files]').click()`);
   await snap('06-dateien');
   await run(`document.documentElement.dataset.theme='light'; document.querySelector('[data-action=course-tab][data-v=content]').click()`);
@@ -198,15 +198,45 @@ async function shots() {
   await wait(500);
   await snap('12-markiert');
   // Strg + Mausrad über einer Stelle der Seite: Zoom um den Mauszeiger
-  const box = await run(`(() => { getSelection().removeAllRanges(); document.querySelector('#sel-bubble').hidden = true; const r = document.querySelector('.pdf-page[data-page="4"]').getBoundingClientRect(); return { x: Math.round(r.left + r.width * 0.25), y: Math.round(r.top + 140), before: V.ctl.scale }; })()`);
+  const box = await run(`(() => { getSelection().removeAllRanges(); ref(V, 'bubble').hidden = true; const r = V.el.querySelector('.pdf-page[data-page="4"]').getBoundingClientRect(); return { x: Math.round(r.left + r.width * 0.25), y: Math.round(r.top + 140), before: V.ctl.scale }; })()`);
+  // Skala pro Frame mitschreiben: der Zoom soll gleichmäßig laufen, nicht springen
+  await run(`window.__zs = []; (function rec() { __zs.push(+V.ctl.scale.toFixed(3)); if (__zs.length < 50) requestAnimationFrame(rec); })()`);
   for (let i = 0; i < 5; i++) {
     win.webContents.sendInputEvent({ type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: 120, wheelTicksY: 1, canScroll: true, modifiers: ['control'] });
     await wait(80);
   }
   await wait(900);
-  console.log('ZOOM', box.before.toFixed(2), '->', (await run('V.ctl.scale')).toFixed(2), 'Label:', await run(`document.querySelector('#viewer-zoom-label').textContent`));
+  console.log('ZOOM', box.before.toFixed(2), '->', (await run('V.ctl.scale')).toFixed(2), 'Label:', await run(`ref(V, 'zoom').textContent`));
+  console.log('ZOOM-FRAMES', (await run('__zs')).join(' '));
   await snap('12b-zoom');
-  await run(`if (document.querySelector('#claude').classList.contains('closed')) document.querySelector('.claude-toggle').click(); document.querySelector('[data-action=set-provider][data-v=chatgpt]').click()`);
+  // Tabs & Split View: zweites Dokument als Tab, daneben anzeigen, Dokumentauswahl
+  await run(`openDoc(Object.values(S.data.files).find((f) => f.downloaded && isPdf(f) && f.id !== V.fileId).id)`);
+  await wait(1500);
+  await snap('12c-tabs');
+  await run(`document.querySelector('[data-action=split-toggle]').click()`);
+  await wait(1500);
+  await snap('12d-split');
+  // Suchleiste und ⋯-Menü in der linken Hälfte, Seiten-/Zoomleiste sichtbar
+  await run(`(() => { const d = activeDoc(D.panes[0]); setPaneFocus(0); openFind(d); ref(d, 'q').value = 'Resonanz'; ref(d, 'find').requestSubmit(); showHud(d, 5000); })()`);
+  await wait(900);
+  await run(`document.querySelector('.vpane[data-pane="0"] [data-action=viewer-more]').click()`);
+  await wait(300);
+  await snap('12d2-suche-menue');
+  await run(`closeMenu(); document.documentElement.dataset.theme = 'dark'`);
+  await wait(300);
+  await snap('12d3-split-dunkel');
+  await run(`document.documentElement.dataset.theme = 'light'`);
+  await run(`document.querySelector('[data-action=tab-add][data-pane="1"]').click()`);
+  await wait(300);
+  await snap('12e-auswahl');
+  await run(`closeModal()`);
+  await run(`document.querySelector('[data-action=split-close]').click()`);
+  console.log('TABS nach Zusammenführen', await run(`JSON.stringify(D.panes.map((p) => p.docs.length))`));
+  await run(`document.querySelector('.vtab.active [data-action=tab-close]').click()`);
+  await wait(800);
+  console.log('TABS nach Schließen', await run(`JSON.stringify(D.panes.map((p) => p.docs.length))`), 'aktiv:', await run('V.fileId && S.data.files[V.fileId].filename'));
+  await snap('12f-ein-tab');
+  await run(`if (document.querySelector('#claude').classList.contains('closed')) document.querySelector('.claude-toggle').click(); if (!document.querySelector('.cp-settings')) document.querySelector('[data-action=model-toggle]').click(); document.querySelector('[data-action=set-provider][data-v=chatgpt]').click()`);
   await wait(800);
   await snap('13-chatgpt-panel');
   await run(`document.querySelector('[data-action=avatar], .avatar').click(); document.querySelector('[data-route=settings]').click(); document.querySelector('[data-action=settings-tab][data-v=ai]').click()`);

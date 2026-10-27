@@ -16,6 +16,8 @@ const S = {
   history: [],
   ui: {
     leftOpen: true,
+    leftOpenCourse: false,
+    modelOpen: false,
     claudeOpen: false,
     dropdown: null,
     collapsed: {},
@@ -76,8 +78,18 @@ function dueIn(ts) {
   const day = new Date(ts * 1000); day.setHours(0, 0, 0, 0);
   const days = Math.round((day - today) / 86400000);
   if (days === 0) return { text: `heute, ${fmtTime(ts)}`, cls: 'danger' };
-  if (days === 1) return { text: 'morgen', cls: 'warn' };
-  return { text: `in ${days} Tagen`, cls: days <= 3 ? 'warn' : 'info' };
+  if (days === 1) return { text: 'morgen', cls: 'danger' };
+  return { text: `in ${days} Tagen`, cls: days <= 3 ? '' : 'quiet' };
+}
+
+// Ein Satz für die Übersicht: was steht an, was ist neu
+function dashSummary(soon, week, news) {
+  const parts = [];
+  if (soon) parts.push(`${soon} ${soon === 1 ? 'Frist' : 'Fristen'} in den nächsten 2 Tagen`);
+  else if (week) parts.push(`${week} ${week === 1 ? 'Frist' : 'Fristen'} diese Woche`);
+  else parts.push('diese Woche keine Fristen');
+  if (news) parts.push(`${news} neue ${news === 1 ? 'Datei' : 'Dateien'}`);
+  return parts.join(' · ');
 }
 
 function dayLabel(ts) {
@@ -107,13 +119,15 @@ const modInfo = (m) => {
 };
 const actIcon = (m, size = '') => { const i = modInfo(m); return `<div class="act-icon ${size} p-${i.purpose}">${icon(i.icon)}</div>`; };
 
+// Erkennungsfarbe pro Kurs: grüne, violette und gelbgrüne Töne – kein Rot/Orange (Akzent, Warnung) und kein Blau
+const COURSE_HUES = [150, 168, 95, 275, 305, 128, 185, 60];
+const courseHue = (k) => COURSE_HUES[(k ? k.id : 1) % COURSE_HUES.length];
 function courseBg(k) {
   if (k && k.image) return `background-image:url("${k.image.replace(/"/g, '%22')}")`;
-  // Platzhalter ohne Kursbild: nur warme und grüne Farbtöne, keine Blautöne
-  const HUES = [14, 28, 40, 352, 330, 150, 168, 85];
-  const h = HUES[(k ? k.id : 1) % HUES.length];
-  return `background-image:linear-gradient(135deg, hsl(${h} 62% 50%), hsl(${(h + 18) % 360} 58% 38%))`;
+  return `--course-h:${courseHue(k)}`;
 }
+// Platzhalter ohne Kursbild: zarte Fläche in der Kursfarbe mit Kurzname
+const courseMono = (k) => (k && k.image ? '' : `<span class="mono">${esc(String((k && (k.shortname || k.fullname)) || '?').split(/[\s_]+/)[0].slice(0, 7))}</span>`);
 
 const courses = () => (S.data ? S.data.courses : []);
 const courseById = (id) => courses().find((k) => k.id === Number(id));
@@ -456,14 +470,15 @@ const submits = {
   'claude-send'() { sendWithSelection(); },
   'nav-search'() { const q = $('#nav-q').value.trim(); if (q) runSearch(q); },
   'doc-search'() { runSearch($('#search-q').value.trim()); },
-  'viewer-search'() {
-    const q = $('#viewer-q').value.trim();
-    if (V.hits && q === V.lastQ && V.hits.length) {
-      V.hitIdx = (V.hitIdx + 1) % V.hits.length;
-      return goToPage(V.hits[V.hitIdx].page);
+  'viewer-search'(form) {
+    const d = docOf(form);
+    const q = ref(d, 'q').value.trim();
+    if (d.hits && q === d.lastQ && d.hits.length) {
+      d.hitIdx = (d.hitIdx + 1) % d.hits.length;
+      return goToPage(d.hits[d.hitIdx].page, d);
     }
-    V.lastQ = q;
-    viewerSearch(q);
+    d.lastQ = q;
+    viewerSearch(q, true, d);
   },
 };
 
@@ -475,15 +490,15 @@ function renderNav() {
   if (!nav || !S.data) return;
   const site = S.data.site || {};
   const r = S.route.name;
-  const unread = (S.data.notifications || []).filter((n) => !n.read).length + (S.data.newItems || []).length;
+  const unread = (S.data.notifications || []).filter((n) => !n.read).length;
   nav.innerHTML = `
     <div class="brand" data-action="go" data-route="dashboard">
-      <div class="brand-mark">${icon('graduation')}</div><b>${esc(site.sitename || 'Chadoodle')}</b>
+      <div class="brand-mark">${icon('graduation')}</div><b>Chadoodle</b>
     </div>
     <nav class="primary-nav">
-      <a href="#" data-action="go" data-route="dashboard" class="${r === 'dashboard' ? 'active' : ''}">Dashboard</a>
-      <a href="#" data-action="go" data-route="courses" class="${['courses', 'course', 'module'].includes(r) ? 'active' : ''}">Meine Kurse</a>
-      <a href="#" data-action="go" data-route="events" class="${r === 'events' ? 'active' : ''}">Termine</a>
+      <a href="#" data-action="go" data-route="dashboard" class="${r === 'dashboard' ? 'active' : ''}">Übersicht</a>
+      <a href="#" data-action="go" data-route="courses" class="${['courses', 'course', 'module', 'viewer'].includes(r) ? 'active' : ''}">Kurse</a>
+      <a href="#" data-action="go" data-route="events" class="${r === 'events' ? 'active' : ''}">Fristen</a>
       <a href="#" data-action="go" data-route="timetable" class="${r === 'timetable' ? 'active' : ''}">Stundenplan</a>
       <a href="#" data-action="go" data-route="mensa" class="${r === 'mensa' ? 'active' : ''}">Mensa</a>
     </nav>
@@ -491,7 +506,7 @@ function renderNav() {
     <div class="spacer"></div>
     <div id="sync-pill-wrap"></div>
     <button class="icon-btn" data-action="dropdown" data-dd="notif" title="Mitteilungen">${icon('bell')}${unread ? `<span class="badge-dot">${unread > 99 ? '99+' : unread}</span>` : ''}</button>
-    <button class="claude-toggle ${S.ui.claudeOpen ? 'active' : ''}" data-action="toggle-claude" title="KI-Lernassistent (Strg+K)" aria-label="KI-Lernassistent">${icon('sparkles')}<span>Assistent</span></button>
+    <button class="claude-toggle ${S.ui.claudeOpen ? 'active' : ''}" data-action="toggle-claude" title="Assistent (Strg+K)" aria-label="Assistent">${icon('sparkles')}<span>Assistent</span></button>
     <button class="avatar" data-action="dropdown" data-dd="user" title="${esc(site.fullname)}">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</button>
     ${S.ui.dropdown ? renderDropdown() : ''}`;
   renderSyncPill();
@@ -502,19 +517,24 @@ function renderSyncPill() {
   if (!wrap) return;
   const st = S.status || {};
   const last = (S.data && S.data.lastSync) || st.lastSync;
-  let cls = 'ok', ic = icon('checkcircle', 'sm'), text = `Synchronisiert · ${relTime(last)}`;
+  let cls = 'ok quiet', ic = icon('cloud', 'sm'), text = `Synchronisiert ${relTime(last)}`;
   if (st.state === 'syncing' || st.state === 'downloading') {
     cls = 'busy';
     ic = icon('refresh', 'sm spin');
     text = st.total ? `${st.state === 'downloading' ? 'Dateien' : 'Sync'} ${st.done}/${st.total}` : st.message || 'Synchronisiere…';
+  } else if (st.state === 'error' && /offline/i.test(st.message || '')) {
+    cls = 'off';
+    ic = icon('cloudoff', 'sm');
+    text = 'Offline';
   } else if (st.state === 'error') {
     cls = 'err';
-    ic = icon('cloudoff', 'sm');
-    text = st.message || 'Fehler';
+    ic = icon('alert', 'sm');
+    text = 'Sync-Problem';
   } else if (!last) {
     text = 'Noch nicht synchronisiert';
   }
-  wrap.innerHTML = `<button class="sync-pill ${cls}" data-action="sync" title="${esc(st.message || '')} – Klicken zum Synchronisieren">${ic}<span>${esc(text)}</span></button>`;
+  const tip = cls === 'off' ? 'Keine Verbindung – alles Gespeicherte bleibt verfügbar. Klicken, um es erneut zu versuchen.' : `${st.message && cls !== 'ok quiet' ? st.message + ' – ' : ''}Zuletzt synchronisiert ${relTime(last)}. Klicken zum Synchronisieren.`;
+  wrap.innerHTML = `<button class="sync-pill ${cls}" data-action="sync" title="${esc(tip)}" aria-label="${esc(text)}">${ic}<span>${esc(text)}</span></button>`;
 }
 
 function renderDropdown() {
@@ -543,6 +563,9 @@ function renderDropdown() {
 }
 
 // ---------- Linke Leiste (Kursindex) ----------
+const leftOpen = () => (S.route.name === 'course' ? S.ui.leftOpenCourse : S.ui.leftOpen);
+const drawerBtn = () => (currentCourseId() && !leftOpen() ? `<button class="icon-btn sm drawer-btn" data-action="toggle-left" title="Seitenleiste einblenden">${icon('sidebar', 'sm')}</button>` : '');
+
 function currentCourseId() {
   if (S.route.name === 'course') return Number(S.route.params.id);
   if (S.route.name === 'module') return Number(S.route.params.courseId);
@@ -553,13 +576,13 @@ function renderLeft() {
   const left = $('#left');
   if (!left || !S.data) return;
   const cid = currentCourseId();
-  const show = !!cid && S.ui.leftOpen;
+  const show = !!cid && leftOpen();
   left.classList.toggle('closed', !show);
   if (!cid) { left.innerHTML = ''; return; }
   const sections = S.data.contents[cid] || [];
   const activeCm = S.route.name === 'module' ? Number(S.route.params.cmid) : null;
   left.innerHTML = `
-    <div class="ci-head"><b>Kursindex</b><button class="icon-btn sm" data-action="toggle-left" title="Kursindex schließen">${icon('chevleft')}</button></div>
+    <div class="ci-head"><b>${esc((courseById(cid) || {}).shortname || 'Kurs')}</b><button class="icon-btn sm" data-action="toggle-left" title="Seitenleiste ausblenden">${icon('sidebar', 'sm')}</button></div>
     ${sections.map((s) => {
       const key = `ci-${cid}-${s.id}`;
       const mods = s.modules.filter((m) => m.modname !== 'label');
@@ -575,7 +598,7 @@ function renderMain() {
   const main = $('#main');
   if (!main || !S.data) return;
   // Den Viewer bei Daten-Updates nicht neu aufbauen (Scrollposition/Zoom bleiben)
-  if (S.route.name === 'viewer' && V.mountedFor === S.route.params.fileId && $('#viewer-scroll')) return;
+  if (S.route.name === 'viewer' && $('#viewer-split')) return;
   const active = document.activeElement;
   const keepId = active && main.contains(active) && active.id ? active.id : null;
   const sel = keepId && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
@@ -593,11 +616,10 @@ function renderMain() {
   else if (r.name === 'settings') html = renderSettings();
   else if (r.name === 'viewer') html = renderViewer();
   else if (r.name === 'search') html = renderSearch();
-  const cid = currentCourseId();
-  main.innerHTML = (cid && !S.ui.leftOpen ? `<button class="icon-btn drawer-toggle" data-action="toggle-left" title="Kursindex öffnen">${icon('sidebar')}</button>` : '') + html;
+  main.innerHTML = html;
 
   main.classList.toggle('no-scroll', r.name === 'viewer');
-  if (r.name === 'viewer') mountViewer();
+  if (r.name === 'viewer') showDocs();
   if (keepId) {
     const el = document.getElementById(keepId);
     if (el) { el.focus(); if (sel) try { el.setSelectionRange(sel[0], sel[1]); } catch {} }
@@ -656,15 +678,17 @@ function timelineHtml(events, { showCourse = true, emptyText = 'Keine anstehende
     g.items.push(e);
   }
   return groups.map((g) => `
-    <div class="tl-group"><div class="tl-date" ${g.label === 'Überfällig' ? 'style="color:var(--danger)"' : ''}>${esc(g.label)}</div>
+    <div class="tl-group"><div class="tl-date">${esc(g.label)}</div>
     ${g.items.map((e) => {
       const m = e.cmid ? findModule(e.cmid) : null;
       const due = dueIn(e.timesort);
+      const k = courseById(e.courseid);
+      const what = e.modulename === 'assign' ? 'Abgabe bis' : e.modulename === 'quiz' ? 'Schließt um' : '';
+      const sub = [showCourse ? (k ? k.shortname || k.fullname : e.coursename) : '', `${what ? what + ' ' : ''}${fmtTime(e.timesort)} Uhr`].filter(Boolean).join(' · ');
       return `<div class="tl-item" ${m ? `data-action="module" data-cmid="${e.cmid}"` : e.url ? `data-action="external" data-url="${esc(e.url)}"` : ''}>
-        <div class="time">${fmtTime(e.timesort)}</div>
         ${actIcon(m ? m.mod : { modname: e.modulename }, 'sm')}
-        <div class="grow"><b>${esc(e.activityname || e.name)}</b><small>${esc(e.name)}${showCourse ? ' · ' + esc(e.coursename) : ''}</small></div>
-        <span class="chip ${due.cls}">${due.text}</span>
+        <div class="grow"><b>${esc(e.activityname || e.name)}</b><small>${esc(sub)}</small></div>
+        ${due.cls === 'danger' ? `<span class="chip danger">${due.text}</span>` : ''}
       </div>`;
     }).join('')}</div>`).join('');
 }
@@ -674,9 +698,8 @@ function renderDashboard() {
   const now = Date.now() / 1000;
   const range = S.ui.tlRange;
   const events = d.events.filter((e) => range === 'all' || e.timesort <= now + Number(range) * 86400);
+  const soon = d.events.filter((e) => e.timesort <= now + 2 * 86400).length;
   const week = d.events.filter((e) => e.timesort > now && e.timesort <= now + 7 * 86400).length;
-  const files = Object.values(d.files);
-  const local = files.filter((f) => f.downloaded).length;
   const recent = [...d.courses].sort((a, b) => (b.lastaccess || 0) - (a.lastaccess || 0)).slice(0, 4);
   const news = (d.newItems || []).filter((x) => x.type === 'file' && d.files[x.fileId]).slice(0, 8);
   const hour = new Date().getHours();
@@ -684,77 +707,56 @@ function renderDashboard() {
 
   return `<div class="page wide">
     <section class="hero">
-      <h1>${greet}, ${esc(d.site.firstname || d.site.fullname)}! 👋</h1>
-      <p>${new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
-      <div class="hero-stats">
-        <div class="hero-stat"><b>${d.courses.length}</b><small>Kurse</small></div>
-        <div class="hero-stat"><b>${week}</b><small>fällig in 7 Tagen</small></div>
-        <div class="hero-stat"><b>${news.length}</b><small>neue Dateien</small></div>
-        <div class="hero-stat"><b>${local}/${files.length}</b><small>Dateien lokal</small></div>
-      </div>
+      <h1>${greet}, ${esc(d.site.firstname || d.site.fullname)}</h1>
+      <p>${new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })} · ${esc(dashSummary(soon, week, news.length))}</p>
     </section>
     <div class="grid-dash">
       <div class="stack">
         <div class="card">
-          <div class="card-head"><h2>${icon('clock')} Zeitleiste</h2>
+          <div class="card-head"><h2>Als Nächstes</h2>
             <div class="segmented">${[['7', '7 Tage'], ['30', '30 Tage'], ['all', 'Alle']].map(([v, l]) => `<button class="${range === v ? 'on' : ''}" data-action="tl-range" data-v="${v}">${l}</button>`).join('')}</div>
           </div>
-          <div class="card-body">${timelineHtml(events)}</div>
+          <div class="card-body">${timelineHtml(events, { emptyText: 'Nichts fällig – genieß die freie Zeit.' })}</div>
         </div>
         <div class="card">
-          <div class="card-head"><h2>${icon('book')} Zuletzt besuchte Kurse</h2><button class="btn ghost sm" data-action="go" data-route="courses">Alle Kurse ${icon('chevright', 'sm')}</button></div>
+          <div class="card-head"><h2>Zuletzt geöffnet</h2><button class="btn ghost sm" data-action="go" data-route="courses">Alle Kurse ${icon('chevright', 'sm')}</button></div>
           <div class="card-body"><div class="course-grid recent">${recent.map(courseCard).join('') || '<div class="empty">Keine Kurse</div>'}</div></div>
         </div>
       </div>
       <div class="stack">
         <div class="card">
-          <div class="card-head"><h2>${icon('download')} Neu synchronisiert</h2>${news.length ? '<button class="btn ghost sm" data-action="clear-news">Gelesen</button>' : ''}</div>
-          <div class="card-body">${news.length ? news.map((x) => { const f = d.files[x.fileId]; const k = courseById(f.courseId); return fileLine(f, k ? k.shortname || k.fullname : ''); }).join('') : `<div class="empty">${icon('checkcircle')}<div>Keine neuen Dateien seit der letzten Durchsicht</div></div>`}</div>
+          <div class="card-head"><h2>Neue Dateien</h2>${news.length ? '<button class="btn ghost sm" data-action="clear-news">Alle gesehen</button>' : ''}</div>
+          <div class="card-body">${news.length ? news.map((x) => { const f = d.files[x.fileId]; const k = courseById(f.courseId); return fileLine(f, k ? k.shortname || k.fullname : ''); }).join('') : `<div class="empty">${icon('checkcircle')}<div>Nichts Neues – alles gesehen.</div></div>`}</div>
         </div>
-        <div class="card" style="background:var(--claude-soft);border-color:color-mix(in srgb,var(--claude) 25%,var(--border))">
-          <div class="card-body" style="padding:18px">
-            <div style="display:flex;gap:12px;align-items:center;margin-bottom:10px"><div class="cp-logo">${icon('sparkles')}</div><b style="font-size:15.5px">Frag die KI zu deinen Unterlagen</b></div>
-            <p class="muted small" style="margin:0 0 12px">Der Assistent durchsucht alle synchronisierten Skripte, Folien und Aufgaben, findet die Stellen und erklärt sie.</p>
-            <div class="suggestions">
-              ${['Was muss ich diese Woche erledigen?', 'Was ist neu in meinen Kursen und worum geht es darin?', 'Erstelle mir einen Lernplan für die nächsten 2 Wochen.'].map((q) => `<div class="suggestion" data-action="ask" data-q="${esc(q)}">${icon('sparkles', 'sm')}${esc(q)}</div>`).join('')}
-            </div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-head"><h2>${icon('hd')} Lokale Kopie</h2></div>
-          <div class="card-body">
-            <dl class="kv small">
-              <dt>Letzter Sync</dt><dd>${relTime(d.lastSync)}</dd>
-              <dt>Dateien lokal</dt><dd>${local} von ${files.length} (${fmtSize(files.filter((f) => f.downloaded).reduce((s, f) => s + (f.filesize || 0), 0)) || '0 KB'})</dd>
-              <dt>Intervall</dt><dd>alle ${S.state.settings.syncIntervalMin} Min.</dd>
-              <dt>Volltextindex</dt><dd id="index-status">${indexText()}</dd>
-            </dl>
-            <div style="display:flex;gap:8px;margin-top:14px"><button class="btn sm" data-action="sync">${icon('refresh', 'sm')} Jetzt synchronisieren</button><button class="btn sm ghost" data-action="open-folder">${icon('folder', 'sm')} Ordner</button></div>
-          </div>
-        </div>
+        ${S.ui.claudeOpen ? '' : `<div class="card ask-card">
+          <div class="card-head"><h2>${icon('sparkles')} Assistent fragen</h2></div>
+          <div class="card-body"><div class="suggestions">
+            ${['Was muss ich diese Woche erledigen?', 'Worum geht es in den neuen Dateien?', 'Erstelle mir einen Lernplan für die nächsten 2 Wochen.'].map((q) => `<div class="suggestion" data-action="ask" data-q="${esc(q)}">${esc(q)}</div>`).join('')}
+          </div></div>
+        </div>`}
       </div>
     </div>
   </div>`;
 }
 
 function fileLine(f, sub = '') {
-  const st = f.downloaded ? `<span class="state ok" title="Lokal verfügbar">${icon('check', 'sm')}</span>` : f.error ? `<span class="state err" title="${esc(f.error)}">${icon('alert', 'sm')}</span>` : `<span class="state" title="Noch nicht heruntergeladen">${icon('cloud', 'sm')}</span>`;
+  const st = f.downloaded ? '' : f.error ? `<span class="state err" title="${esc(f.error)}">${icon('alert', 'sm')}</span>` : `<span class="state" title="Noch nicht heruntergeladen">${icon('cloud', 'sm')}</span>`;
   return `<div class="file-line" data-action="open-file" data-file="${f.id}" title="${esc(f.localPath)}">
     ${icon(/\.(pdf|docx?|txt|md|pptx?)$/i.test(f.filename) ? 'filetext' : 'file', 'sm')}
     <div class="grow">${esc(f.filename)}${sub ? ` <span class="muted small">· ${esc(sub)}</span>` : ''}</div>
     <span class="muted small">${fmtSize(f.filesize)}</span>${st}
-    <button class="icon-btn sm claude-mini" data-action="ask-file" data-file="${f.id}" title="Mit KI besprechen">${icon('sparkles', 'sm')}</button>
+    <button class="icon-btn sm claude-mini" data-action="ask-file" data-file="${f.id}" title="Assistent fragen">${icon('sparkles', 'sm')}</button>
     <button class="icon-btn sm" data-action="show-file" data-file="${f.id}" title="${SHOW_FILE.title}">${icon(SHOW_FILE.icon, 'sm')}</button>
   </div>`;
 }
 
 function courseCard(k) {
   return `<div class="course-card" data-action="course" data-id="${k.id}">
-    <div class="course-img" style='${courseBg(k)}'>${k.isfavourite ? `<span class="fav">${icon('star', 'sm')}</span>` : ''}</div>
+    <div class="course-img ${k.image ? '' : 'ph'}" style='${courseBg(k)}'>${courseMono(k)}${k.isfavourite ? `<span class="fav">${icon('star', 'sm')}</span>` : ''}</div>
     <div class="course-info">
       <div class="cat">${esc(k.categoryname || k.shortname)}</div>
       <h3>${esc(k.fullname)}</h3>
-      <div class="meta">${k.progress != null ? `<div class="progress"><i style="width:${Math.round(k.progress)}%"></i></div><span>${Math.round(k.progress)}%</span>` : `<span>${esc(k.shortname)}</span>`}</div>
+      <div class="meta">${k.progress != null ? `<div class="progress"><i style="width:${Math.round(k.progress)}%"></i></div><span>${Math.round(k.progress)} % erledigt</span>` : `<span>${esc(k.shortname)}</span>`}</div>
     </div>
   </div>`;
 }
@@ -777,7 +779,7 @@ function renderCourses() {
   const filters = [['all', 'Alle'], ['inprogress', 'Laufend'], ['future', 'Zukünftig'], ['past', 'Vergangen'], ['fav', 'Favoriten']];
 
   return `<div class="page wide">
-    <div class="page-head"><div><h1>Meine Kurse</h1><p>${courses().length} Kurse · lokal synchronisiert</p></div></div>
+    <div class="page-head"><div><h1>Kurse</h1><p>${list.length === courses().length ? `${courses().length} Kurse` : `${list.length} von ${courses().length} Kursen`}</p></div></div>
     <div class="toolbar">
       <div class="input-icon">${icon('search')}<input id="course-search" class="input" placeholder="Kurse durchsuchen…" value="${esc(S.ui.courseSearch)}" data-input="course-search" /></div>
       <div class="segmented">${filters.map(([v, l]) => `<button class="${f === v ? 'on' : ''}" data-action="course-filter" data-v="${v}">${l}</button>`).join('')}</div>
@@ -786,7 +788,7 @@ function renderCourses() {
     </div>
     ${!list.length ? `<div class="card empty">${icon('book')}<div>Keine Kurse für diesen Filter</div></div>`
       : S.ui.courseView === 'cards' ? `<div class="course-grid">${list.map(courseCard).join('')}</div>`
-      : `<div class="course-list">${list.map((k) => `<div class="course-row" data-action="course" data-id="${k.id}"><div class="thumb" style='${courseBg(k)}'></div><div class="grow"><div class="muted small">${esc(k.categoryname || k.shortname)}</div><h3>${esc(k.fullname)}</h3></div>${k.progress != null ? `<div style="width:140px;display:flex;gap:8px;align-items:center" class="small muted"><div class="progress"><i style="width:${Math.round(k.progress)}%"></i></div>${Math.round(k.progress)}%</div>` : ''}<span class="muted small" style="width:120px;text-align:right">${k.lastaccess ? 'Zuletzt ' + fmtDate(k.lastaccess) : ''}</span></div>`).join('')}</div>`}
+      : `<div class="course-list">${list.map((k) => `<div class="course-row" data-action="course" data-id="${k.id}"><div class="thumb ${k.image ? '' : 'ph'}" style='${courseBg(k)}'>${courseMono(k)}</div><div class="grow"><div class="muted small">${esc(k.categoryname || k.shortname)}</div><h3>${esc(k.fullname)}</h3></div>${k.progress != null ? `<div style="width:140px;display:flex;gap:8px;align-items:center" class="small muted"><div class="progress"><i style="width:${Math.round(k.progress)}%"></i></div>${Math.round(k.progress)}%</div>` : ''}<span class="muted small" style="width:120px;text-align:right">${k.lastaccess ? 'Zuletzt ' + fmtDate(k.lastaccess) : ''}</span></div>`).join('')}</div>`}
   </div>`;
 }
 
@@ -798,26 +800,26 @@ function renderCourse() {
   const sections = S.data.contents[k.id] || [];
   const files = Object.values(S.data.files).filter((f) => f.courseId === k.id);
   const evs = S.data.events.filter((e) => e.courseid === k.id);
-  const tabs = [['content', 'Kurs', 'book'], ['events', 'Termine', 'calendar', evs.length], ['grades', 'Bewertungen', 'award'], ['files', 'Dateien', 'folder', files.length]];
+  const tabs = [['content', 'Inhalte', 'book'], ['events', 'Fristen', 'calendar', evs.length], ['grades', 'Noten', 'award'], ['files', 'Dateien', 'folder', files.length]];
 
   let body = '';
+  let tabExtra = '';
   if (tab === 'content') {
     const allCollapsed = sections.every((s) => S.ui.collapsed[`s-${k.id}-${s.id}`]);
-    body = `<div style="display:flex;justify-content:flex-end;gap:8px;margin:-6px 0 12px">
-        <button class="btn sm ghost" data-action="collapse-all" data-id="${k.id}" data-v="${allCollapsed ? '0' : '1'}">${allCollapsed ? 'Alle aufklappen' : 'Alle einklappen'}</button>
-      </div>` + sections.map((s) => sectionHtml(k, s)).join('');
+    tabExtra = `<button class="btn sm ghost" data-action="collapse-all" data-id="${k.id}" data-v="${allCollapsed ? '0' : '1'}">${allCollapsed ? 'Alle aufklappen' : 'Alle einklappen'}</button>`;
+    body = sections.map((s) => sectionHtml(k, s)).join('');
   } else if (tab === 'events') {
     const assigns = Object.entries(S.data.assignments).filter(([, a]) => a.courseid === k.id).sort((a, b) => (a[1].duedate || 9e9) - (b[1].duedate || 9e9));
     body = `<div class="grid-dash">
       <div class="card"><div class="card-head"><h2>${icon('clock')} Anstehend</h2></div><div class="card-body">${timelineHtml(evs, { showCourse: false })}</div></div>
       <div class="card"><div class="card-head"><h2>${icon('clipboard')} Alle Aufgaben</h2></div><div class="card-body">${assigns.length ? assigns.map(([cmid, a]) => {
         const due = a.duedate ? dueIn(a.duedate) : null;
-        return `<div class="tl-item" data-action="module" data-cmid="${cmid}">${actIcon({ modname: 'assign' }, 'sm')}<div class="grow"><b>${esc(a.name)}</b><small>${a.duedate ? 'Fällig ' + fmtDateTime(a.duedate) : 'Kein Fälligkeitsdatum'}</small></div>${due && a.duedate > Date.now() / 1000 ? `<span class="chip ${due.cls}">${due.text}</span>` : a.duedate ? '<span class="chip">vorbei</span>' : ''}</div>`;
+        return `<div class="tl-item" data-action="module" data-cmid="${cmid}">${actIcon({ modname: 'assign' }, 'sm')}<div class="grow"><b>${esc(a.name)}</b><small>${a.duedate ? 'Abgabe bis ' + fmtDateTime(a.duedate) : 'Ohne Frist'}</small></div>${due && a.duedate > Date.now() / 1000 ? (due.cls === 'quiet' ? `<span class="muted small">${due.text}</span>` : `<span class="chip ${due.cls}">${due.text}</span>`) : a.duedate ? '<span class="muted small">Frist vorbei</span>' : ''}</div>`;
       }).join('') : `<div class="empty">${icon('clipboard')}<div>Keine Aufgaben</div></div>`}</div></div>
     </div>`;
   } else if (tab === 'grades') {
     const g = S.data.grades[k.id] || [];
-    body = `<div class="card">${g.length ? `<table class="table"><thead><tr><th>Bewertungsaspekt</th><th>Bewertung</th><th>Bereich</th><th>Prozent</th><th>Feedback</th></tr></thead><tbody>
+    body = `<div class="card">${g.length ? `<table class="table"><thead><tr><th>Leistung</th><th>Note</th><th>Skala</th><th>Prozent</th><th>Feedback</th></tr></thead><tbody>
       ${g.map((it) => `<tr class="${it.itemtype === 'course' ? 'total' : ''}"><td>${it.cmid ? `<a href="#" data-action="module" data-cmid="${it.cmid}">${esc(strip(it.name))}</a>` : esc(strip(it.name))}</td><td>${esc(it.grade || '–')}</td><td class="muted">${esc(it.range || '')}</td><td>${esc(it.percentage || '')}</td><td class="rich small">${clean(it.feedback)}</td></tr>`).join('')}
     </tbody></table>` : `<div class="empty">${icon('award')}<div>Noch keine Bewertungen</div></div>`}</div>`;
   } else if (tab === 'files') {
@@ -827,22 +829,23 @@ function renderCourse() {
     body = `<div class="toolbar">
         <div class="input-icon">${icon('search')}<input id="file-search" class="input" placeholder="Dateien durchsuchen…" value="${esc(S.ui.fileSearch)}" data-input="file-search" /></div>
         <button class="btn sm" data-action="open-folder" data-id="${k.id}">${icon('folder', 'sm')} Kursordner öffnen</button>
-        ${missing ? `<button class="btn sm" data-action="download-missing" data-id="${k.id}">${icon('download', 'sm')} ${missing} fehlende laden</button>` : ''}
+        ${missing ? `<button class="btn sm" data-action="download-missing" data-id="${k.id}">${icon('download', 'sm')} ${missing} ${missing === 1 ? 'Datei' : 'Dateien'} herunterladen</button>` : ''}
       </div>
       <div class="card"><table class="table"><thead><tr><th>Name</th><th>Abschnitt</th><th>Größe</th><th>Geändert</th><th></th></tr></thead><tbody>
-      ${list.map((f) => `<tr><td><a href="#" data-action="open-file" data-file="${f.id}">${esc(f.filename)}</a><div class="muted small">${esc(f.moduleName)}</div></td><td class="muted small">${esc(f.section.replace(/^\d+ /, ''))}</td><td class="small">${fmtSize(f.filesize)}</td><td class="small">${fmtDate(f.timemodified)}</td>
-        <td style="white-space:nowrap;text-align:right">${f.downloaded ? `<span class="chip ok">${icon('check', 'sm')} lokal</span>` : f.error ? `<span class="chip warn" title="${esc(f.error)}">Fehler</span>` : '<span class="chip">online</span>'}
-        <button class="icon-btn sm claude-mini" data-action="ask-file" data-file="${f.id}" title="Mit KI besprechen">${icon('sparkles', 'sm')}</button><button class="icon-btn sm" data-action="show-file" data-file="${f.id}" title="${SHOW_FILE.title}">${icon(SHOW_FILE.icon, 'sm')}</button></td></tr>`).join('')}
+      ${list.map((f) => `<tr><td><a href="#" class="file-name" data-action="open-file" data-file="${f.id}">${esc(f.filename)}</a>${f.moduleName && ![f.filename, f.filename.replace(/\.[^.]+$/, '')].includes(f.moduleName) ? `<div class="muted small">${esc(f.moduleName)}</div>` : ''}</td><td class="muted small">${esc(f.section.replace(/^\d+ /, ''))}</td><td class="small nowrap">${fmtSize(f.filesize)}</td><td class="small">${fmtDate(f.timemodified)}</td>
+        <td style="white-space:nowrap;text-align:right">${f.downloaded ? '' : f.error ? `<span class="chip warn" title="${esc(f.error)}">Fehler</span>` : '<span class="chip">nur online</span>'}
+        <button class="icon-btn sm claude-mini" data-action="ask-file" data-file="${f.id}" title="Assistent fragen">${icon('sparkles', 'sm')}</button><button class="icon-btn sm" data-action="show-file" data-file="${f.id}" title="${SHOW_FILE.title}">${icon(SHOW_FILE.icon, 'sm')}</button></td></tr>`).join('')}
       </tbody></table>${!list.length ? `<div class="empty">${icon('folder')}<div>Keine Dateien</div></div>` : ''}</div>`;
   }
 
   return `<div class="page">
-    <div class="page-top">${backButton('Kursübersicht', 'go', 'data-route="courses"')}<div class="crumbs"><a href="#" data-action="go" data-route="courses">Meine Kurse</a>${icon('chevright')}<span>${esc(k.shortname)}</span></div></div>
-    <div class="course-banner" style='${courseBg(k)}'>
-      <div class="inner"><div><div class="cat">${esc(k.categoryname || k.shortname)}</div><h1>${esc(k.fullname)}</h1></div>
-      <div style="display:flex;gap:8px"><button class="btn sm" data-action="ask" data-q="Gib mir einen Überblick über diesen Kurs: Inhalte, wichtige Materialien und was als Nächstes ansteht.">${icon('sparkles', 'sm')} Überblick</button><button class="btn sm" data-action="open-folder" data-id="${k.id}">${icon('folder', 'sm')} Ordner</button><button class="btn sm" data-action="external" data-url="${esc(S.data.site.url)}/course/view.php?id=${k.id}">${icon('external', 'sm')}</button></div></div>
+    <div class="page-top">${drawerBtn()}${backButton('Kurse', 'go', 'data-route="courses"')}</div>
+    <div class="course-head">
+      <div class="course-tile ${k.image ? '' : 'ph'}" style='${courseBg(k)}'>${courseMono(k)}</div>
+      <div class="grow"><div class="cat">${esc(k.categoryname || k.shortname)}</div><h1>${esc(k.fullname)}</h1></div>
+      <div class="course-actions"><button class="btn sm claude" data-action="ask" data-q="Gib mir einen Überblick über diesen Kurs: Inhalte, wichtige Materialien und was als Nächstes ansteht.">${icon('sparkles', 'sm')} Überblick</button><button class="btn sm" data-action="open-folder" data-id="${k.id}">${icon('folder', 'sm')} Ordner</button><button class="btn sm" data-action="external" data-url="${esc(S.data.site.url)}/course/view.php?id=${k.id}">${icon('external', 'sm')} In Moodle</button></div>
     </div>
-    <div class="tabs">${tabs.map(([v, l, ic, n]) => `<a href="#" class="${tab === v ? 'active' : ''}" data-action="course-tab" data-v="${v}">${icon(ic, 'sm')} ${l}${n ? ` <span class="count">${n}</span>` : ''}</a>`).join('')}</div>
+    <div class="tabs-row"><div class="tabs">${tabs.map(([v, l, ic, n]) => `<a href="#" class="${tab === v ? 'active' : ''}" data-action="course-tab" data-v="${v}">${l}${n ? ` <span class="count">${n}</span>` : ''}</a>`).join('')}</div>${tabExtra}</div>
     ${body}
   </div>`;
 }
@@ -856,7 +859,6 @@ function sectionHtml(k, s) {
     <div class="section-head" data-action="section-toggle" data-key="${key}">
       <span class="chev">${icon('chevdown', 'sm')}</span>
       <h2>${esc(s.name || 'Abschnitt ' + s.section)}</h2>
-      <span class="muted">${mods.filter((m) => m.modname !== 'label').length} Aktivitäten</span>
     </div>
     <div class="section-body">
       ${strip(s.summary) ? `<div class="section-summary rich">${clean(s.summary)}</div>` : ''}
@@ -874,7 +876,7 @@ function activityHtml(m) {
   const chips = [];
   if (a && a.duedate) {
     const due = dueIn(a.duedate);
-    chips.push(`<span class="chip ${a.duedate > Date.now() / 1000 ? due.cls : ''}">${icon('clock', 'sm')} Fällig: ${fmtDateTime(a.duedate)}</span>`);
+    chips.push(`<span class="chip ${a.duedate > Date.now() / 1000 && due.cls !== 'quiet' ? due.cls : ''}">${icon('clock', 'sm')} Abgabe bis ${fmtDateTime(a.duedate)}</span>`);
   } else if (m.dates && m.dates.length) {
     for (const dt of m.dates.slice(0, 2)) chips.push(`<span class="chip">${esc(dt.label)} ${fmtDateTime(dt.timestamp)}</span>`);
   }
@@ -884,22 +886,23 @@ function activityHtml(m) {
   let state = '';
   if (m.modname === 'resource' && files.length === 1) {
     const f = files[0];
-    state = f.downloaded ? `<span class="state ok">${icon('check', 'sm')} ${fmtSize(f.filesize)}</span>` : f.error ? `<span class="state err" title="${esc(f.error)}">${icon('alert', 'sm')} Fehler</span>` : `<span class="state">${icon('cloud', 'sm')} ${fmtSize(f.filesize)}</span>`;
+    const ext = f.filename.includes('.') ? f.filename.split('.').pop().toUpperCase() : '';
+    const meta = [ext.length <= 5 ? ext : '', fmtSize(f.filesize)].filter(Boolean).join(' · ');
+    state = f.downloaded ? `<span class="state">${meta}</span>` : f.error ? `<span class="state err" title="${esc(f.error)}">${icon('alert', 'sm')} Fehler</span>` : `<span class="state" title="Noch nicht heruntergeladen">${icon('cloud', 'sm')} ${meta}</span>`;
   } else if (m.modname === 'folder') {
     state = `<span class="state">${files.length} Dateien</span>`;
   }
-  const ext = m.modname === 'resource' && files[0] ? files[0].filename.split('.').pop().toUpperCase() : '';
   const openFolder = m.modname === 'folder' && S.ui.openFolders[m.id];
 
   return `<div class="activity ${dim}" data-action="activity" data-cmid="${m.id}">
       ${actIcon(m)}
       <div class="grow">
-        <div class="type">${esc(info.label)}${ext && ext.length <= 5 ? ' · ' + esc(ext) : ''}</div>
+        ${info.purpose === 'content' ? '' : `<div class="type">${esc(info.label)}</div>`}
         <span class="name">${esc(m.name)}</span>
         ${chips.length ? `<div class="dates">${chips.join('')}</div>` : ''}
       </div>
       <div class="actions">
-        ${files.length || ['page', 'assign', 'forum'].includes(m.modname) ? `<button class="icon-btn sm claude-mini" data-action="${files.length === 1 ? 'ask-file' : 'ask-module'}" data-file="${files[0] ? files[0].id : ''}" data-cmid="${m.id}" title="Mit KI besprechen">${icon('sparkles', 'sm')}</button>` : ''}
+        ${files.length || ['page', 'assign', 'forum'].includes(m.modname) ? `<button class="icon-btn sm claude-mini" data-action="${files.length === 1 ? 'ask-file' : 'ask-module'}" data-file="${files[0] ? files[0].id : ''}" data-cmid="${m.id}" title="Assistent fragen">${icon('sparkles', 'sm')}</button>` : ''}
         ${files.length === 1 ? `<button class="icon-btn sm" data-action="show-file" data-file="${files[0].id}" title="${SHOW_FILE.title}">${icon(SHOW_FILE.icon, 'sm')}</button>` : ''}
         ${m.url ? `<button class="icon-btn sm" data-action="external" data-url="${esc(m.url)}" title="In Moodle öffnen">${icon('external', 'sm')}</button>` : ''}
       </div>
@@ -926,9 +929,9 @@ function renderModule() {
     const due = a.duedate ? dueIn(a.duedate) : null;
     blocks.push(`<div class="card"><div class="card-body" style="padding-top:18px">
       <dl class="kv">
-        ${a.allowsubmissionsfromdate ? `<dt>Geöffnet</dt><dd>${fmtDateTime(a.allowsubmissionsfromdate)}</dd>` : ''}
-        <dt>Fällig</dt><dd>${a.duedate ? fmtDateTime(a.duedate) + ` <span class="chip ${a.duedate > Date.now() / 1000 ? due.cls : ''}" style="margin-left:6px">${a.duedate > Date.now() / 1000 ? due.text : 'abgelaufen'}</span>` : 'Kein Fälligkeitsdatum'}</dd>
-        ${a.cutoffdate ? `<dt>Letzte Abgabe</dt><dd>${fmtDateTime(a.cutoffdate)}</dd>` : ''}
+        <dt>Abgabe bis</dt><dd>${a.duedate ? fmtDateTime(a.duedate) + (a.duedate > Date.now() / 1000 ? (due.cls === 'quiet' ? ` <span class="muted">· ${due.text}</span>` : ` <span class="chip ${due.cls}" style="margin-left:6px">${due.text}</span>`) : ' <span class="muted">· Frist vorbei</span>') : 'Ohne Frist'}</dd>
+        ${a.cutoffdate ? `<dt>Verspätet möglich bis</dt><dd>${fmtDateTime(a.cutoffdate)}</dd>` : ''}
+        ${a.allowsubmissionsfromdate && a.allowsubmissionsfromdate > Date.now() / 1000 ? `<dt>Abgabe möglich ab</dt><dd>${fmtDateTime(a.allowsubmissionsfromdate)}</dd>` : ''}
       </dl></div></div>`);
     if (strip(a.intro)) blocks.push(`<div class="card"><div class="card-head"><h2>Aufgabenstellung</h2></div><div class="card-body rich">${clean(a.intro)}</div></div>`);
   } else if (strip(m.description) && !page) {
@@ -949,10 +952,10 @@ function renderModule() {
   }
 
   return `<div class="page">
-    <div class="page-top">${backButton(k ? k.shortname || 'Zum Kurs' : 'Zum Kurs', 'course', `data-id="${courseId}"`)}<div class="crumbs"><a href="#" data-action="go" data-route="courses">Meine Kurse</a>${icon('chevright')}<a href="#" data-action="course" data-id="${courseId}">${esc(k ? k.shortname : '')}</a>${icon('chevright')}<span>${esc(s.name)}</span></div></div>
-    <div class="detail-head">${actIcon(m)}<div style="flex:1;min-width:0"><div class="type muted small" style="font-weight:700;text-transform:uppercase;letter-spacing:.05em">${esc(info.label)}</div><h1>${esc(m.name)}</h1></div>
-      <button class="btn claude" data-action="${files.length === 1 ? 'ask-file' : 'ask-module'}" data-file="${files[0] ? files[0].id : ''}" data-cmid="${m.id}">${icon('sparkles', 'sm')} Mit KI besprechen</button>
-      ${m.url ? `<button class="btn" data-action="external" data-url="${esc(m.url)}">${icon('external', 'sm')} ${a ? 'Abgabe in Moodle' : 'In Moodle öffnen'}</button>` : ''}
+    <div class="page-top">${drawerBtn()}${backButton(k ? k.shortname || 'Zum Kurs' : 'Zum Kurs', 'course', `data-id="${courseId}"`)}</div>
+    <div class="detail-head">${actIcon(m)}<div style="flex:1;min-width:0"><div class="eyebrow">${esc(info.label)} · ${esc(s.name || 'Abschnitt ' + s.section)}</div><h1>${esc(m.name)}</h1></div>
+      <button class="btn claude" data-action="${files.length === 1 ? 'ask-file' : 'ask-module'}" data-file="${files[0] ? files[0].id : ''}" data-cmid="${m.id}">${icon('sparkles', 'sm')} Assistent fragen</button>
+      ${m.url ? `<button class="btn ${a ? 'primary' : ''}" data-action="external" data-url="${esc(m.url)}">${icon('external', 'sm')} ${a ? 'In Moodle abgeben' : 'In Moodle öffnen'}</button>` : ''}
     </div>
     <div class="stack">${blocks.join('')}</div>
   </div>`;
@@ -1577,7 +1580,7 @@ function ttManageCard() {
 function renderEventsPage() {
   const evs = S.data.events;
   return `<div class="page">
-    <div class="page-head"><div><h1>Termine</h1><p>Anstehende Abgaben und Aktivitäten aus allen Kursen</p></div><button class="btn claude" data-action="ask" data-q="Plane meine nächsten zwei Wochen anhand meiner anstehenden Abgaben und Termine. Was sollte ich wann erledigen?">${icon('sparkles', 'sm')} Wochenplan mit KI</button></div>
+    <div class="page-head"><div><h1>Fristen</h1><p>Was in deinen Kursen als Nächstes fällig ist</p></div><button class="btn claude" data-action="ask" data-q="Plane meine nächsten zwei Wochen anhand meiner anstehenden Abgaben und Termine. Was sollte ich wann erledigen?">${icon('sparkles', 'sm')} Wochenplan mit KI</button></div>
     <div class="card"><div class="card-body" style="padding-top:16px">${timelineHtml(evs)}</div></div>
   </div>`;
 }
@@ -1704,8 +1707,24 @@ const accountRun = async (fn, ok) => {
 // ---------- Dokumente: Viewer & Volltextsuche ----------
 const isPdf = (f) => /\.pdf$/i.test(f.filename) || f.mimetype === 'application/pdf';
 const canRead = (f) => /\.(pdf|docx|pptx|xlsx|odt|odp|txt|md|csv|tex|c|h|cpp|py|java|m|vhd|vhdl|js|ts|json|xml|html?)$/i.test(f.filename);
-const V = { ctl: null, mountedFor: null, page: 1, total: 0, sel: null, hits: null, hitIdx: -1, textPages: null, loading: false, error: null };
+// Offene Dokumente liegen als Tabs in bis zu zwei Hälften (Split View). Jede Hälfte hat eigene
+// Tabs; V ist das aktive Dokument der zuletzt benutzten Hälfte – darauf beziehen sich Tastatur,
+// Claude-Kontext und „Seite erklären“.
+let docSeq = 0;
+const newDoc = (fileId, page = 1, q = '') => ({
+  key: ++docSeq, fileId, startPage: page, q, el: null, token: null, ctl: null, mountedFor: null,
+  page, total: 0, sel: null, hits: null, hitIdx: -1, lastQ: null, textPages: null, textZoom: 1, error: null,
+});
+const NO_DOC = newDoc(null);
+const D = { panes: [], focus: 0, ratio: 0.5, drag: null, pickPane: 0 };
+let V = NO_DOC;
 let pdfModule = null;
+
+const activeDoc = (p) => (p ? p.docs[p.active] : null);
+const paneOf = (d) => D.panes.findIndex((p) => p.docs.includes(d));
+const docByKey = (k) => D.panes.flatMap((p) => p.docs).find((d) => d.key === Number(k)) || null;
+const docOf = (el) => docByKey(el.closest('[data-doc]') && el.closest('[data-doc]').dataset.doc) || V;
+const ref = (d, name) => (d.el ? d.el.querySelector(`[data-ref="${name}"]`) : null);
 
 function hlHtml(text, terms) {
   let html = esc(text);
@@ -1717,188 +1736,652 @@ function hlHtml(text, terms) {
   return html;
 }
 
-function renderViewer() {
-  const f = S.data.files[S.route.params.fileId];
-  if (!f) return `<div class="page"><div class="card empty">Dokument nicht gefunden</div></div>`;
-  const k = courseById(f.courseId);
-  const pdf = isPdf(f);
-  const q = S.route.params.q || '';
-  return `<div class="viewer">
-    <div class="viewer-bar">
-      <button class="icon-btn" data-action="viewer-back" title="Zurück">${icon('chevleft')}</button>
-      <div class="vb-title"><b title="${esc(f.filename)}">${esc(f.filename)}</b><small>${esc(k ? k.shortname || k.fullname : '')} · ${esc(f.moduleName)}</small></div>
-      <div class="vb-group">
-        <button class="icon-btn sm" data-action="viewer-page" data-d="-1" title="Vorherige Seite">${icon('chevleft', 'sm')}</button>
-        <span class="vb-page"><input id="viewer-page" class="input" value="${V.page}" data-input="viewer-page" /> / <span id="viewer-total">${V.total || '…'}</span></span>
-        <button class="icon-btn sm" data-action="viewer-page" data-d="1" title="Nächste Seite">${icon('chevright', 'sm')}</button>
-      </div>
-      ${pdf ? `<div class="vb-group">
-        <button class="icon-btn sm" data-action="viewer-zoom" data-z="out" title="Verkleinern">${icon('minus', 'sm')}</button>
-        <button class="btn sm ghost" data-action="viewer-zoom" data-z="fit" id="viewer-zoom-label" title="An Breite anpassen">Breite</button>
-        <button class="icon-btn sm" data-action="viewer-zoom" data-z="in" title="Vergrößern">${icon('plus', 'sm')}</button>
-      </div>` : ''}
-      <form class="vb-search" data-submit="viewer-search">
-        <div class="input-icon">${icon('search', 'sm')}<input id="viewer-q" class="input" placeholder="Im Dokument suchen…" value="${esc(q)}" /></div>
-        <span class="muted small" id="viewer-hits"></span>
-      </form>
-      <div class="vb-group">
-        <button class="btn sm claude" data-action="viewer-ask" data-mode="page" title="Aktuelle Seite erklären lassen">${icon('sparkles', 'sm')} Seite erklären</button>
-        <button class="icon-btn sm" data-action="viewer-ask" data-mode="summary" title="Dokument zusammenfassen">${icon('list', 'sm')}</button>
-        <button class="icon-btn sm" data-action="show-file" data-file="${f.id}" title="${SHOW_FILE.title}">${icon(SHOW_FILE.icon, 'sm')}</button>
-        <button class="icon-btn sm" data-action="open-file-external" data-file="${f.id}" title="${WEB ? 'In neuem Tab öffnen' : 'Mit Standard-App öffnen'}">${icon('external', 'sm')}</button>
-      </div>
-    </div>
-    <div class="viewer-body">
-      <div class="viewer-scroll" id="viewer-scroll">${V.error ? `<div class="card empty" style="margin:40px auto;max-width:480px">${icon('alert')}<div>${esc(V.error)}</div></div>` : `<div class="empty">${icon('refresh', 'spin')}<div>Lade Dokument…</div></div>`}</div>
-      <div class="viewer-hitlist" id="viewer-hitlist" hidden></div>
-    </div>
-    <div class="sel-bubble" id="sel-bubble" hidden>
-      <button class="btn sm claude" data-action="sel-ask" data-mode="explain">${icon('sparkles', 'sm')} Erklären</button>
-      <button class="btn sm" data-action="sel-ask" data-mode="ask">Frage dazu…</button>
-      <button class="btn sm ghost" data-action="sel-ask" data-mode="search">${icon('search', 'sm')} In allen Dokumenten</button>
-    </div>
-  </div>`;
+function syncFocus() {
+  D.focus = Math.max(0, Math.min(D.panes.length - 1, D.focus));
+  V = activeDoc(D.panes[D.focus]) || NO_DOC;
+  // Route zeigt immer auf das aktive Dokument, damit „Zurück“ dorthin zurückführt
+  if (S.route.name === 'viewer' && V.fileId) S.route.params = { fileId: V.fileId };
 }
 
-async function mountViewer() {
-  const id = S.route.params.fileId;
+function findTab(fileId, pane = null) {
+  const panes = pane == null ? D.panes : [D.panes[pane]].filter(Boolean);
+  for (const p of panes) for (const d of p.docs) if (d.fileId === fileId) return d;
+  return null;
+}
+
+function focusTab(d) {
+  const pi = paneOf(d);
+  if (pi < 0) return d;
+  D.focus = pi;
+  D.panes[pi].active = D.panes[pi].docs.indexOf(d);
+  syncFocus();
+  return d;
+}
+
+// Neuer Tab rechts neben dem aktiven; pane == Anzahl der Hälften legt die zweite Hälfte an
+function openTab(fileId, page = 1, q = '', pane = D.focus) {
+  if (pane >= D.panes.length) {
+    D.panes.push({ docs: [], active: 0 });
+    pane = D.panes.length - 1;
+  }
+  const p = D.panes[pane];
+  const at = p.docs.length ? p.active + 1 : 0;
+  const d = newDoc(fileId, page, q);
+  p.docs.splice(at, 0, d);
+  p.active = at;
+  D.focus = pane;
+  syncFocus();
+  return d;
+}
+
+function ensureRouteTab() {
+  const { fileId, page, q } = S.route.params;
+  const f = fileId && S.data.files[fileId];
+  if (f && canRead(f)) {
+    const d = V.fileId === fileId ? V : findTab(fileId);
+    if (d) focusTab(d);
+    else openTab(fileId, page || 1, q || '');
+  }
+  syncFocus();
+}
+
+function renderViewer() {
+  ensureRouteTab();
+  if (!D.panes.length) return `<div class="page"><div class="card empty">Dokument nicht gefunden</div></div>`;
+  return `<div class="viewer-split" id="viewer-split"></div>`;
+}
+
+// Tabname ohne Endung und Unterstriche – der volle Dateiname steht im Tooltip
+const docTitle = (f) => (f ? f.filename.replace(/\.[^.]+$/, '').replace(/_+/g, ' ').trim() || f.filename : 'Dokument');
+
+// Eine Kopfzeile pro Hälfte: Tabs links, Werkzeuge für das aktive Dokument rechts
+function tabsHtml(p, i) {
+  const split = D.panes.length > 1;
+  const cur = activeDoc(p);
+  return `${i === 0 ? `<button class="icon-btn sm vt-back" data-action="viewer-back" title="Zurück (Alt+←)">${icon('chevleft', 'sm')}</button>` : ''}
+    <div class="vtab-list">${p.docs.map((d, j) => {
+      const f = S.data.files[d.fileId];
+      const k = f && courseById(f.courseId);
+      const tip = f ? [f.filename, [k ? k.shortname || k.fullname : '', f.moduleName].filter(Boolean).join(' · ')].filter(Boolean).join('\n') : '';
+      return `<div class="vtab ${j === p.active ? 'active' : ''}" draggable="true" data-action="tab-select" data-doc="${d.key}" title="${esc(tip)}">
+        <span class="vtab-name">${esc(docTitle(f))}</span>
+        <button class="vtab-x" data-action="tab-close" data-doc="${d.key}" title="Tab schließen">${icon('x', 'sm')}</button>
+      </div>`;
+    }).join('')}</div>
+    <button class="icon-btn sm vt-add" data-action="tab-add" data-pane="${i}" title="Weiteres Dokument öffnen">${icon('plus', 'sm')}</button>
+    <div class="spacer"></div>
+    ${cur ? `<div class="vt-tools">
+      <button class="icon-btn sm" data-action="viewer-find" data-doc="${cur.key}" title="Im Dokument suchen (Strg+F)">${icon('search', 'sm')}</button>
+      <button class="btn sm claude vb-ask" data-action="viewer-ask" data-mode="page" data-doc="${cur.key}" title="Aktuelle Seite vom Assistenten erklären lassen">${icon('sparkles', 'sm')}<span>Erklären</span></button>
+      <button class="icon-btn sm" data-action="viewer-more" data-doc="${cur.key}" title="Weitere Aktionen">${icon('more', 'sm')}</button>
+    </div>` : ''}
+    ${i === 0
+      ? `<button class="icon-btn sm vt-split ${split ? 'active' : ''}" data-action="split-toggle" aria-pressed="${split}" title="${split ? 'Geteilte Ansicht beenden' : 'Zwei Dokumente nebeneinander'}">${icon('columns', 'sm')}</button>`
+      : `<button class="icon-btn sm vt-split" data-action="split-close" title="Geteilte Ansicht beenden">${icon('x', 'sm')}</button>`}`;
+}
+
+// Dokumentfläche: Suchleiste (nur bei Bedarf), Seiten, schwebende Leiste für Seite und Zoom
+function docHtml(d) {
+  const f = S.data.files[d.fileId];
+  if (!f) return `<div class="viewer-body"><div class="viewer-scroll"><div class="card empty" style="margin:40px auto;max-width:480px">Dokument nicht gefunden</div></div></div>`;
+  const pdf = isPdf(f);
+  return `<form class="vfind" data-submit="viewer-search" data-ref="find" ${d.q ? '' : 'hidden'}>
+      <div class="input-icon">${icon('search', 'sm')}<input class="input" data-ref="q" placeholder="Im Dokument suchen" value="${esc(d.q || '')}" /></div>
+      <span class="vfind-count" data-ref="hits"></span>
+      <button type="button" class="icon-btn sm" data-action="find-step" data-d="-1" title="Vorheriger Treffer (Umschalt+Enter)">${icon('chevup', 'sm')}</button>
+      <button type="button" class="icon-btn sm" data-action="find-step" data-d="1" title="Nächster Treffer (Enter)">${icon('chevdown', 'sm')}</button>
+      <button type="button" class="btn sm ghost" data-action="find-list" data-ref="listbtn" disabled>Alle Treffer</button>
+      <button type="button" class="btn sm ghost" data-action="find-close">Fertig</button>
+    </form>
+    <div class="viewer-body">
+      <div class="viewer-scroll" data-ref="scroll"><div class="empty">${icon('refresh', 'spin')}<div>Lade Dokument…</div></div></div>
+      <div class="viewer-hitlist" data-ref="hitlist" hidden></div>
+      <div class="vhud" data-ref="hud">
+        <button class="icon-btn sm" data-action="viewer-page" data-d="-1" title="Vorherige Seite (Bild ↑)">${icon('chevleft', 'sm')}</button>
+        <span class="vb-page"><input class="input" value="${d.page}" data-ref="page" aria-label="Seite" /><span>von <span data-ref="total">${d.total || '…'}</span></span></span>
+        <button class="icon-btn sm" data-action="viewer-page" data-d="1" title="Nächste Seite (Bild ↓)">${icon('chevright', 'sm')}</button>
+        ${pdf ? `<i class="vhud-sep"></i>
+        <button class="icon-btn sm" data-action="viewer-zoom" data-z="out" title="Verkleinern (Strg −)">${icon('minus', 'sm')}</button>
+        <button class="vhud-zoom" data-action="viewer-zoom" data-z="fit" data-ref="zoom" title="An Breite anpassen (Strg+0)">Breite</button>
+        <button class="icon-btn sm" data-action="viewer-zoom" data-z="in" title="Vergrößern (Strg +)">${icon('plus', 'sm')}</button>` : ''}
+      </div>
+    </div>
+    <div class="sel-bubble" data-ref="bubble" hidden>
+      <button class="btn sm claude" data-action="sel-ask" data-mode="explain">${icon('sparkles', 'sm')} Erklären</button>
+      <button class="btn sm" data-action="sel-ask" data-mode="ask">Frage dazu…</button>
+      <button class="btn sm ghost" data-action="sel-ask" data-mode="search" title="In allen Dokumenten suchen">${icon('search', 'sm')}</button>
+    </div>`;
+}
+
+// Die Leiste für Seite und Zoom erscheint bei Mausbewegung oder Scrollen und blendet sich dann aus
+function showHud(d, ms = 1600) {
+  const hud = ref(d, 'hud');
+  if (!hud) return;
+  hud.classList.add('on');
+  clearTimeout(d.hudTimer);
+  d.hudTimer = setTimeout(function hide() {
+    if (hud.matches(':hover, :focus-within')) { d.hudTimer = setTimeout(hide, 800); return; }
+    hud.classList.remove('on');
+  }, ms);
+}
+
+function wireDoc(d) {
+  const show = () => showHud(d);
+  d.el.addEventListener('pointermove', show, { passive: true });
+  ref(d, 'scroll').addEventListener('scroll', show, { passive: true });
+  showHud(d, 2600);
+}
+
+// Suchleiste im Dokument
+function openFind(d) {
+  const bar = ref(d, 'find');
+  if (!bar) return;
+  bar.hidden = false;
+  const q = ref(d, 'q');
+  q.focus();
+  q.select();
+}
+
+function closeFind(d) {
+  const bar = ref(d, 'find');
+  if (!bar) return;
+  bar.hidden = true;
+  ref(d, 'hitlist').hidden = true;
+  ref(d, 'q').value = '';
+  d.lastQ = null;
+  viewerSearch('', false, d);
+}
+
+function updateFind(d) {
+  const el = ref(d, 'hits');
+  const btn = ref(d, 'listbtn');
+  const n = d.hits ? d.hits.length : 0;
+  if (btn) btn.disabled = !n;
+  if (!el) return;
+  if (!d.hits) el.textContent = '';
+  else if (!n) el.textContent = 'Keine Treffer';
+  else if (d.hitIdx < 0) el.textContent = `auf ${n} ${n === 1 ? 'Seite' : 'Seiten'}`;
+  else el.textContent = `${d.hitIdx + 1} von ${n}`;
+}
+
+// Schwebendes Menü (z. B. „⋯“ im Viewer)
+function openMenu(anchor, html) {
+  closeMenu();
+  const m = document.createElement('div');
+  m.id = 'vmenu';
+  m.className = 'vmenu';
+  m.setAttribute('role', 'menu');
+  m.innerHTML = html;
+  document.body.appendChild(m);
+  const r = anchor.getBoundingClientRect();
+  m.style.left = `${Math.max(8, Math.min(window.innerWidth - m.offsetWidth - 8, r.right - m.offsetWidth))}px`;
+  m.style.top = `${r.bottom + 6}px`;
+  const first = m.querySelector('button');
+  if (first) first.focus();
+}
+const closeMenu = () => { const m = $('#vmenu'); if (m) m.remove(); };
+
+function docMenuHtml(d) {
+  const f = S.data.files[d.fileId];
+  const pi = paneOf(d);
+  const split = D.panes.length > 1;
+  const item = (action, ic, label, attrs = '') => `<button class="vmenu-item" role="menuitem" data-action="${action}" data-doc="${d.key}" ${attrs}>${icon(ic, 'sm')}<span>${label}</span></button>`;
+  return [
+    item('viewer-ask', 'list', 'Dokument zusammenfassen', 'data-mode="summary"'),
+    f && isPdf(f) ? item('viewer-zoom', 'fit', 'An Breite anpassen', 'data-z="fit"') : '',
+    '<div class="vmenu-sep"></div>',
+    item('tab-move', 'columns', split ? 'In die andere Hälfte verschieben' : D.panes[pi] && D.panes[pi].docs.length > 1 ? 'Daneben anzeigen' : 'Anderes Dokument daneben öffnen…'),
+    f ? item('show-file', SHOW_FILE.icon, SHOW_FILE.title, `data-file="${f.id}"`) : '',
+    f ? item('open-file-external', 'external', WEB ? 'In neuem Tab öffnen' : 'Mit Standard-App öffnen', `data-file="${f.id}"`) : '',
+    '<div class="vmenu-sep"></div>',
+    item('tab-close', 'x', 'Tab schließen'),
+  ].join('');
+}
+
+// Daneben anzeigen: in die andere Hälfte, als neue Hälfte, oder (bei nur einem Tab) Dokument auswählen
+function splitWith(d) {
+  if (!d) return;
+  const pi = paneOf(d);
+  if (D.panes.length > 1) return moveDoc(d, 1 - pi);
+  if (D.panes[pi].docs.length > 1) return moveDoc(d, 1);
+  openPicker(1);
+}
+
+
+// In ein anderes Element umhängen, ohne die Scrollposition zu verlieren
+function place(el, parent) {
+  if (el.parentNode === parent) return;
+  const sc = el.querySelector('.viewer-scroll');
+  const top = sc ? sc.scrollTop : 0;
+  const left = sc ? sc.scrollLeft : 0;
+  parent.appendChild(el);
+  if (sc) { sc.scrollTop = top; sc.scrollLeft = left; }
+}
+
+// Gleicht die Oberfläche mit D ab: Hälften, Tab-Leisten und Dokumente (aktive sichtbar,
+// inaktive bleiben unsichtbar geladen, damit Wechseln sofort geht und Position/Zoom bleiben)
+function showDocs() {
+  const split = $('#viewer-split');
+  if (!split) return;
+  const before = V;
+  syncFocus();
+  let secs = [...split.querySelectorAll(':scope > .vpane')];
+  while (secs.length < D.panes.length) {
+    if (secs.length) {
+      const h = document.createElement('div');
+      h.className = 'vsplit-handle';
+      h.title = 'Breite ändern (Doppelklick: gleich breit)';
+      split.appendChild(h);
+    }
+    const s = document.createElement('section');
+    s.className = 'vpane';
+    s.innerHTML = '<div class="vtabs"></div><div class="vpane-docs"></div>';
+    split.appendChild(s);
+    secs.push(s);
+  }
+  split.style.setProperty('--split', D.ratio);
+  split.classList.toggle('is-split', D.panes.length > 1);
+  const fresh = [];
+  D.panes.forEach((p, i) => {
+    const sec = secs[i];
+    sec.dataset.pane = i;
+    sec.classList.toggle('focused', D.panes.length > 1 && i === D.focus);
+    const bar = sec.querySelector('.vtabs');
+    bar.dataset.pane = i;
+    bar.innerHTML = tabsHtml(p, i);
+    const box = sec.querySelector('.vpane-docs');
+    p.docs.forEach((d, j) => {
+      const on = j === p.active;
+      if (!d.el && on) {
+        d.el = document.createElement('div');
+        d.el.className = 'viewer';
+        d.el.dataset.doc = d.key;
+        d.el.innerHTML = docHtml(d);
+        fresh.push(d);
+      }
+      if (!d.el) return;
+      place(d.el, box);
+      d.el.classList.toggle('inactive', !on);
+      d.el.inert = !on;
+    });
+    const act = bar.querySelector('.vtab.active');
+    if (act) act.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  });
+  for (const s of secs.slice(D.panes.length)) {
+    if (s.previousElementSibling && s.previousElementSibling.classList.contains('vsplit-handle')) s.previousElementSibling.remove();
+    s.remove();
+  }
+  fresh.forEach((d) => { wireDoc(d); mountDoc(d); });
+  if (V !== before) renderClaudeContext();
+}
+
+// Nur die Fokus-Markierung umschalten (ohne die Tab-Leisten neu aufzubauen)
+function setPaneFocus(pi) {
+  if (pi === D.focus || !D.panes[pi]) return;
+  D.focus = pi;
+  syncFocus();
+  document.querySelectorAll('#viewer-split > .vpane').forEach((s) => s.classList.toggle('focused', D.panes.length > 1 && Number(s.dataset.pane) === pi));
+  updateViewerBar();
+  renderClaudeContext();
+}
+
+async function mountDoc(d) {
+  const id = d.fileId;
   const f = S.data.files[id];
-  const host = $('#viewer-scroll');
+  const host = ref(d, 'scroll');
   if (!f || !host) return;
-  V.mountedFor = id;
-  V.error = null;
+  const token = (d.token = {});
+  d.mountedFor = id;
+  d.error = null;
+  const start = d.startPage || 1;
   try {
     if (isPdf(f)) {
       pdfModule = pdfModule || (await import('./viewer.js'));
       const data = await api.fileData(id);
-      if (V.mountedFor !== id) return;
+      if (d.token !== token) return;
       host.innerHTML = '';
-      const terms = S.route.params.q ? S.route.params.q.split(/\s+/) : [];
-      V.ctl = await pdfModule.openPdf(host, {
-        data, page: S.route.params.page || 1, zoom: 'fit', terms,
-        onPage: (n, total) => { V.page = n; V.total = total; updateViewerBar(); },
-        onSelection: (sel) => showSelBubble(sel),
-        onZoom: () => updateViewerBar(),
+      const terms = d.q ? d.q.split(/\s+/) : [];
+      const ctl = await pdfModule.openPdf(host, {
+        data, page: start, zoom: 'fit', terms,
+        onPage: (n, total) => { d.page = n; d.total = total; updateViewerBar(d); },
+        onSelection: (sel) => showSelBubble(sel, d),
+        onZoom: () => { updateViewerBar(d); showHud(d); },
       });
-      V.total = V.ctl.numPages;
-      V.page = S.route.params.page || 1;
+      if (d.token !== token) return ctl.destroy();
+      d.ctl = ctl;
+      d.total = ctl.numPages;
+      d.page = start;
     } else {
       const r = await api.docPages(id, 1, 2000);
-      if (V.mountedFor !== id) return;
-      V.textPages = r.pages;
-      V.total = r.total;
-      V.page = S.route.params.page || 1;
-      renderTextPages();
-      if (V.page > 1) goToPage(V.page);
-      V.textZoom = 1;
+      if (d.token !== token) return;
+      d.textPages = r.pages;
+      d.total = r.total;
+      d.page = start;
+      renderTextPages([], d);
+      if (d.page > 1) goToPage(d.page, d);
+      d.textZoom = 1;
       host.onwheel = (e) => {
         if (!e.ctrlKey) return;
         e.preventDefault();
-        V.textZoom = Math.max(0.6, Math.min(2.5, V.textZoom * Math.exp(-e.deltaY * 0.0018)));
-        host.style.setProperty('--tp-zoom', V.textZoom);
-        updateViewerBar();
+        d.textZoom = Math.max(0.6, Math.min(2.5, d.textZoom * Math.exp(-e.deltaY * 0.0018)));
+        host.style.setProperty('--tp-zoom', d.textZoom);
+        updateViewerBar(d);
       };
       host.onscroll = () => {
         const mid = host.getBoundingClientRect().top + host.clientHeight / 3;
         const el = [...host.querySelectorAll('.text-page')].find((p) => { const r = p.getBoundingClientRect(); return r.top <= mid && r.bottom >= mid; });
-        if (el && Number(el.dataset.page) !== V.page) { V.page = Number(el.dataset.page); updateViewerBar(); }
+        if (el && Number(el.dataset.page) !== d.page) { d.page = Number(el.dataset.page); updateViewerBar(d); }
       };
       host.onmouseup = () => setTimeout(() => {
         const s = window.getSelection();
         const text = s ? s.toString().trim() : '';
-        if (!text) return showSelBubble(null);
+        if (!text) return showSelBubble(null, d);
         const pageEl = s.anchorNode.parentElement && s.anchorNode.parentElement.closest('.text-page');
-        showSelBubble({ text, rect: s.getRangeAt(0).getBoundingClientRect(), page: pageEl ? Number(pageEl.dataset.page) : V.page });
+        showSelBubble({ text, rect: s.getRangeAt(0).getBoundingClientRect(), page: pageEl ? Number(pageEl.dataset.page) : d.page }, d);
       }, 10);
     }
-    updateViewerBar();
-    renderClaudeContext();
-    if (S.route.params.q) viewerSearch(S.route.params.q, false);
+    updateViewerBar(d);
+    if (d === V) renderClaudeContext();
+    if (d.q) viewerSearch(d.q, false, d);
   } catch (e) {
-    V.error = 'Dokument konnte nicht geöffnet werden: ' + cleanErr(e);
-    host.innerHTML = `<div class="card empty" style="margin:40px auto;max-width:480px">${icon('alert')}<div>${esc(V.error)}</div><button class="btn" style="margin-top:12px" data-action="open-file-external" data-file="${id}">Mit Standard-App öffnen</button></div>`;
+    if (d.token !== token) return;
+    d.error = 'Dokument konnte nicht geöffnet werden: ' + cleanErr(e);
+    host.innerHTML = `<div class="card empty" style="margin:40px auto;max-width:480px">${icon('alert')}<div>${esc(d.error)}</div><button class="btn" style="margin-top:12px" data-action="open-file-external" data-file="${id}">Mit Standard-App öffnen</button></div>`;
   }
 }
 
-function renderTextPages(terms = []) {
-  const host = $('#viewer-scroll');
-  if (!host || !V.textPages) return;
-  const f = S.data.files[V.mountedFor];
+function renderTextPages(terms = [], d = V) {
+  const host = ref(d, 'scroll');
+  if (!host || !d.textPages) return;
+  const f = S.data.files[d.fileId];
   const label = /\.(pptx|odp)$/i.test(f.filename) ? 'Folie' : /\.xlsx$/i.test(f.filename) ? 'Tabelle' : 'Abschnitt';
-  host.innerHTML = `<div class="text-pages">${V.textPages.map((p) => `<div class="text-page card" data-page="${p.n}"><div class="tp-head">${label} ${p.n}</div><div class="tp-body">${hlHtml(p.text, terms) || '<span class="muted">(kein Text)</span>'}</div></div>`).join('')}</div>`;
+  host.innerHTML = `<div class="text-pages">${d.textPages.map((p) => `<div class="text-page card" data-page="${p.n}"><div class="tp-head">${label} ${p.n}</div><div class="tp-body">${hlHtml(p.text, terms) || '<span class="muted">(kein Text)</span>'}</div></div>`).join('')}</div>`;
+}
+
+// Gibt die geladene Ansicht frei; der Tab selbst (Datei, Seite, Suche) bleibt erhalten
+function destroyDoc(d) {
+  clearTimeout(d.hudTimer);
+  if (d.ctl) d.ctl.destroy();
+  if (d.el) d.el.remove();
+  if (d.mountedFor) d.startPage = d.page;
+  Object.assign(d, { el: null, token: null, ctl: null, mountedFor: null, sel: null, hits: null, hitIdx: -1, lastQ: null, textPages: null, error: null });
 }
 
 function unmountViewer() {
-  if (V.ctl) V.ctl.destroy();
-  Object.assign(V, { ctl: null, mountedFor: null, page: 1, total: 0, sel: null, hits: null, hitIdx: -1, textPages: null, error: null });
+  for (const p of D.panes) p.docs.forEach(destroyDoc);
+  const s = $('#viewer-split');
+  if (s) s.remove();
 }
 
-function updateViewerBar() {
-  const inp = $('#viewer-page');
-  if (inp && document.activeElement !== inp) inp.value = V.page;
-  if ($('#viewer-total')) $('#viewer-total').textContent = V.total || '…';
-  if ($('#viewer-zoom-label') && V.ctl) $('#viewer-zoom-label').textContent = Math.round(V.ctl.scale * 100) + ' %';
-  if ($('#viewer-zoom-label') && !V.ctl && V.textZoom) $('#viewer-zoom-label').textContent = Math.round(V.textZoom * 100) + ' %';
+function closeTab(d) {
+  const pi = paneOf(d);
+  if (pi < 0) return;
+  const p = D.panes[pi];
+  const j = p.docs.indexOf(d);
+  destroyDoc(d);
+  p.docs.splice(j, 1);
+  if (j < p.active) p.active--;
+  p.active = Math.max(0, Math.min(p.active, p.docs.length - 1));
+  if (!p.docs.length) {
+    D.panes.splice(pi, 1);
+    if (D.focus >= pi) D.focus--;
+  }
+  if (!D.panes.length) {
+    syncFocus();
+    // Nicht zurück in einen Viewer-Eintrag des Verlaufs – der würde den Tab wieder öffnen
+    while (S.history.length && S.history[S.history.length - 1].name === 'viewer') S.history.pop();
+    return goBack();
+  }
+  showDocs();
+}
+
+// Tab verschieben: in eine andere Hälfte, an eine Position, oder (to == Anzahl) in eine neue Hälfte
+function moveDoc(d, to, at = null) {
+  const from = paneOf(d);
+  if (from < 0) return;
+  if (to >= D.panes.length) {
+    D.panes.push({ docs: [], active: 0 });
+    to = D.panes.length - 1;
+  }
+  const src = D.panes[from];
+  const dst = D.panes[to];
+  const j = src.docs.indexOf(d);
+  if (at == null || at > dst.docs.length) at = dst.docs.length;
+  if (src === dst && j < at) at--;
+  src.docs.splice(j, 1);
+  dst.docs.splice(at, 0, d);
+  dst.active = at;
+  if (src !== dst) {
+    if (j < src.active) src.active--;
+    src.active = Math.max(0, Math.min(src.active, src.docs.length - 1));
+    if (!src.docs.length) D.panes.splice(from, 1);
+  }
+  D.focus = D.panes.indexOf(dst);
+  showDocs();
+}
+
+function updateViewerBar(d = V) {
+  const inp = ref(d, 'page');
+  if (inp && document.activeElement !== inp) inp.value = d.page;
+  const total = ref(d, 'total');
+  if (total) total.textContent = d.total || '…';
+  const zoom = ref(d, 'zoom');
+  if (zoom && d.ctl) zoom.textContent = Math.round(d.ctl.scale * 100) + ' %';
   const chip = $('#ctx-page');
-  if (chip) chip.textContent = `S. ${V.page}`;
+  if (chip && d === V) chip.textContent = `S. ${d.page}`;
 }
 
-function goToPage(n) {
-  n = Math.max(1, Math.min(V.total || 1, n));
-  if (V.ctl) V.ctl.goTo(n, true);
+function goToPage(n, d = V) {
+  n = Math.max(1, Math.min(d.total || 1, n));
+  if (d.ctl) d.ctl.goTo(n, true);
   else {
-    const el = document.querySelector(`.text-page[data-page="${n}"]`);
+    const el = d.el && d.el.querySelector(`.text-page[data-page="${n}"]`);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
-  V.page = n;
-  updateViewerBar();
+  d.page = n;
+  updateViewerBar(d);
 }
 
-function showSelBubble(sel) {
-  const b = $('#sel-bubble');
+function showSelBubble(sel, d = V) {
+  const b = ref(d, 'bubble');
   if (!b) return;
-  V.sel = sel;
+  d.sel = sel;
   if (!sel || sel.text.length < 2) { b.hidden = true; return; }
-  const host = $('.viewer').getBoundingClientRect();
+  const host = d.el.getBoundingClientRect();
   b.hidden = false;
-  b.style.left = `${Math.max(8, Math.min(host.width - 380, sel.rect.left - host.left))}px`;
-  b.style.top = `${Math.max(56, sel.rect.bottom - host.top + 8)}px`;
+  const w = b.offsetWidth;
+  const h = b.offsetHeight;
+  b.style.left = `${Math.max(8, Math.min(host.width - w - 8, sel.rect.left + sel.rect.width / 2 - host.left - w / 2))}px`;
+  let top = sel.rect.top - host.top - h - 8;
+  if (top < 8) top = sel.rect.bottom - host.top + 8;
+  b.style.top = `${top}px`;
 }
 
-async function viewerSearch(q, jump = true) {
-  const id = V.mountedFor;
-  const list = $('#viewer-hitlist');
+async function viewerSearch(q, jump = true, d = V) {
+  const id = d.fileId;
+  const list = ref(d, 'hitlist');
+  d.q = q;
   if (!q.trim()) {
-    V.hits = null;
+    d.hits = null;
     if (list) list.hidden = true;
-    if ($('#viewer-hits')) $('#viewer-hits').textContent = '';
-    V.ctl ? V.ctl.highlight([]) : renderTextPages();
+    updateFind(d);
+    d.ctl ? d.ctl.highlight([]) : renderTextPages([], d);
     return;
   }
   const r = await api.docSearch(q, { fileId: id, limit: 200, perFile: 200 });
-  V.hits = r.hits.sort((a, b) => a.page - b.page);
-  V.hitIdx = -1;
-  if (V.ctl) V.ctl.highlight(r.terms); else renderTextPages(r.terms);
-  if ($('#viewer-hits')) $('#viewer-hits').textContent = r.hits.length ? `${r.hits.length} Seite${r.hits.length > 1 ? 'n' : ''}` : 'keine Treffer';
+  if (!d.el) return;
+  d.hits = r.hits.sort((a, b) => a.page - b.page);
+  d.hitIdx = -1;
+  if (d.ctl) d.ctl.highlight(r.terms); else renderTextPages(r.terms, d);
   if (list) {
-    list.hidden = !r.hits.length;
+    if (!r.hits.length) list.hidden = true;
     list.innerHTML = `<div class="hl-head"><b>Treffer</b><button class="icon-btn sm" data-action="viewer-hits-close">${icon('x', 'sm')}</button></div>` +
-      V.hits.map((h, i) => `<div class="hl-item" data-action="viewer-hit" data-i="${i}"><span class="chip info">S. ${h.page}</span><div class="small">${hlHtml(h.snippet, r.terms)}</div></div>`).join('');
+      d.hits.map((h, i) => `<div class="hl-item" data-action="viewer-hit" data-i="${i}"><span class="chip info">S. ${h.page}</span><div class="small">${hlHtml(h.snippet, r.terms)}</div></div>`).join('');
   }
-  if (jump && V.hits.length) { V.hitIdx = 0; goToPage(V.hits[0].page); }
+  if (jump && d.hits.length) { d.hitIdx = 0; goToPage(d.hits[0].page, d); }
+  updateFind(d);
 }
 
-async function openDoc(fileId, page = 1, q = '') {
+// Öffnet ein Dokument als Tab (oder holt den vorhandenen Tab nach vorn)
+async function openDoc(fileId, page = 1, q = '', pane = null) {
   const f = S.data.files[fileId];
   if (!f) return;
   if (!canRead(f)) return openFile(fileId, true);
-  if (S.route.name === 'viewer' && V.mountedFor === fileId) {
-    if (q && q !== S.route.params.q) { S.route.params.q = q; $('#viewer-q').value = q; viewerSearch(q, false); }
-    return goToPage(page);
+  const existing = findTab(fileId, pane);
+  if (!f.downloaded && !existing) toast(`Lade ${f.filename}…`);
+  const d = existing ? focusTab(existing) : openTab(fileId, page, q, pane == null ? D.focus : pane);
+  if (existing && !d.el) {
+    if (page > 1) d.startPage = page;
+    if (q) d.q = q;
   }
-  if (!f.downloaded) toast(`Lade ${f.filename}…`);
-  go('viewer', { fileId, page, q });
+  if (S.route.name !== 'viewer') return go('viewer', { fileId });
+  showDocs();
+  if (existing && d.el) {
+    if (q && q !== d.q) { const inp = ref(d, 'q'); if (inp) inp.value = q; ref(d, 'find').hidden = false; viewerSearch(q, false, d); }
+    if (page > 1) goToPage(page, d);
+  }
 }
+
+// Dokumentauswahl im Viewer (für „+“ und „Daneben öffnen“)
+function pickList(q) {
+  const cur = V.fileId && S.data.files[V.fileId];
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const files = Object.values(S.data.files).filter(canRead).map((f) => {
+    const k = courseById(f.courseId);
+    // Bei Datei-Aktivitäten heißt das Modul meist wie die Datei – dann nicht doppelt anzeigen
+    const mod = f.moduleName && ![f.filename, f.filename.replace(/\.[^.]+$/, '')].includes(f.moduleName) ? f.moduleName : '';
+    return { f, sub: [k ? k.shortname || k.fullname : '', mod].filter(Boolean).join(' · ') };
+  }).filter(({ f, sub }) => {
+    const hay = `${f.filename} ${sub}`.toLowerCase();
+    return terms.every((t) => hay.includes(t));
+  }).sort((a, b) =>
+    (cur && b.f.courseId === cur.courseId) - (cur && a.f.courseId === cur.courseId) ||
+    !!b.f.downloaded - !!a.f.downloaded ||
+    a.f.filename.localeCompare(b.f.filename, 'de'));
+  if (!files.length) return `<div class="muted small pick-empty">Keine passenden Dokumente</div>`;
+  return files.slice(0, 80).map(({ f, sub }) => `<button class="pick-item" data-action="pick-doc" data-file="${f.id}">
+    ${icon(isPdf(f) ? 'filetext' : 'file', 'sm')}<span><b>${esc(f.filename)}</b><small>${esc(sub)}</small></span>
+    ${findTab(f.id) ? '<span class="chip">offen</span>' : ''}</button>`).join('');
+}
+
+function openPicker(pane) {
+  D.pickPane = pane;
+  showModal(`<h3>${pane >= D.panes.length ? 'Dokument daneben öffnen' : 'Dokument öffnen'}</h3>
+    <div class="input-icon pick-q">${icon('search', 'sm')}<input id="pick-q" class="input" data-input="pick-q" placeholder="Dateiname, Kurs oder Abschnitt…" autocomplete="off" /></div>
+    <div class="pick-list" id="pick-list">${pickList('')}</div>`);
+  $('#modal .modal').classList.add('pick-modal');
+  $('#pick-q').focus();
+}
+
+// Tabs per Drag & Drop umsortieren, in die andere Hälfte ziehen oder an den Rand ziehen zum Teilen
+function dropTarget(e) {
+  const split = $('#viewer-split');
+  if (!split || !D.drag) return null;
+  const bar = e.target.closest && e.target.closest('.vtabs');
+  if (bar) {
+    const pane = Number(bar.dataset.pane);
+    const tabs = [...bar.querySelectorAll('.vtab')];
+    let at = tabs.findIndex((t) => { const r = t.getBoundingClientRect(); return e.clientX < r.left + r.width / 2; });
+    if (at < 0) at = tabs.length;
+    return { pane, at, tab: tabs[at] || null, end: at === tabs.length ? tabs[tabs.length - 1] : null };
+  }
+  const sec = e.target.closest && e.target.closest('.vpane-docs') && e.target.closest('.vpane');
+  if (!sec) return null;
+  const pane = Number(sec.dataset.pane);
+  const r = sec.getBoundingClientRect();
+  if (D.panes.length === 1) {
+    // Rechte Hälfte der Ansicht = neue Hälfte; geht nur, wenn links noch ein Tab übrig bleibt
+    if (D.panes[0].docs.length < 2 || e.clientX < r.left + r.width / 2) return null;
+    return { pane: 1, zone: { left: r.left + r.width / 2, top: r.top, width: r.width / 2, height: r.height } };
+  }
+  if (pane === paneOf(D.drag)) return null;
+  return { pane, zone: { left: r.left, top: r.top, width: r.width, height: r.height } };
+}
+
+function showDropHint(t) {
+  document.querySelectorAll('.vtab.drop-before, .vtab.drop-after').forEach((x) => x.classList.remove('drop-before', 'drop-after'));
+  let z = $('#vdrop');
+  if (t && t.zone) {
+    if (!z) {
+      z = document.createElement('div');
+      z.id = 'vdrop';
+      z.className = 'vdrop';
+      document.body.appendChild(z);
+    }
+    Object.assign(z.style, { left: `${t.zone.left}px`, top: `${t.zone.top}px`, width: `${t.zone.width}px`, height: `${t.zone.height}px` });
+  } else if (z) z.remove();
+  if (t && t.tab) t.tab.classList.add('drop-before');
+  if (t && t.end) t.end.classList.add('drop-after');
+}
+
+document.addEventListener('dragstart', (e) => {
+  const t = e.target.closest && e.target.closest('.vtab');
+  if (!t) return;
+  D.drag = docByKey(t.dataset.doc);
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', t.textContent.trim());
+  t.classList.add('dragging');
+});
+document.addEventListener('dragover', (e) => {
+  if (!D.drag) return;
+  const t = dropTarget(e);
+  showDropHint(t);
+  if (t) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }
+});
+document.addEventListener('drop', (e) => {
+  if (!D.drag) return;
+  const t = dropTarget(e);
+  const d = D.drag;
+  showDropHint(null);
+  D.drag = null;
+  if (!t) return;
+  e.preventDefault();
+  moveDoc(d, t.pane, t.at);
+});
+document.addEventListener('dragend', () => {
+  D.drag = null;
+  showDropHint(null);
+  document.querySelectorAll('.vtab.dragging').forEach((x) => x.classList.remove('dragging'));
+});
+
+// Fokus folgt der Hälfte, in die geklickt wird
+document.addEventListener('pointerdown', (e) => {
+  const sec = e.target.closest && e.target.closest('#viewer-split > .vpane');
+  if (sec) setPaneFocus(Number(sec.dataset.pane));
+  const handle = e.target.closest && e.target.closest('.vsplit-handle');
+  if (!handle) return;
+  e.preventDefault();
+  const split = $('#viewer-split');
+  split.classList.add('resizing');
+  handle.setPointerCapture(e.pointerId);
+  const move = (ev) => {
+    const r = split.getBoundingClientRect();
+    D.ratio = Math.max(0.2, Math.min(0.8, (ev.clientX - r.left) / r.width));
+    split.style.setProperty('--split', D.ratio);
+  };
+  const up = () => {
+    split.classList.remove('resizing');
+    handle.removeEventListener('pointermove', move);
+    handle.removeEventListener('pointerup', up);
+    handle.removeEventListener('pointercancel', up);
+  };
+  handle.addEventListener('pointermove', move);
+  handle.addEventListener('pointerup', up);
+  handle.addEventListener('pointercancel', up);
+}, true);
+document.addEventListener('dblclick', (e) => {
+  if (!e.target.closest || !e.target.closest('.vsplit-handle')) return;
+  D.ratio = 0.5;
+  $('#viewer-split').style.setProperty('--split', D.ratio);
+});
+// Mittlere Maustaste schließt einen Tab
+document.addEventListener('auxclick', (e) => {
+  const t = e.button === 1 && e.target.closest && e.target.closest('.vtab');
+  if (!t) return;
+  e.preventDefault();
+  const d = docByKey(t.dataset.doc);
+  if (d) closeTab(d);
+});
 
 // Globale Dokumentsuche
 function renderSearch() {
@@ -1924,7 +2407,7 @@ function renderSearch() {
         <div class="result-head" data-action="open-doc" data-file="${f.id}" data-page="${g.hits[0].page}" data-q="${esc(q)}">
           ${icon(isPdf(f) ? 'filetext' : 'file')}
           <div class="grow"><b>${esc(f.filename)}</b><small>${esc(k ? k.shortname || k.fullname : '')} · ${esc(f.section.replace(/^\d+ /, ''))}</small></div>
-          <button class="icon-btn sm claude-mini" data-action="ask-file" data-file="${f.id}" title="Mit KI besprechen">${icon('sparkles', 'sm')}</button>
+          <button class="icon-btn sm claude-mini" data-action="ask-file" data-file="${f.id}" title="Assistent fragen">${icon('sparkles', 'sm')}</button>
         </div>
         ${g.hits.map((h) => `<div class="result-hit" data-action="open-doc" data-file="${f.id}" data-page="${h.page}" data-q="${esc(q)}"><span class="chip info">S. ${h.page}</span><div>${hlHtml(h.snippet, r.terms)}</div></div>`).join('')}
       </div>`;
@@ -1932,12 +2415,12 @@ function renderSearch() {
   }
   return `<div class="page">
     <div class="page-head"><div><h1>Dokumente durchsuchen</h1><p>${st ? `${st.indexed} von ${st.total} Dokumenten indexiert${st.running ? ' · indexiere…' : ''}` : ''}</p></div>
-      ${q ? `<button class="btn claude" data-action="ask" data-q="${esc(`Suche in meinen Unterlagen nach „${q}“ und erkläre mir, was dort dazu steht – mit Fundstellen.`)}">${icon('sparkles', 'sm')} KI fragen</button>` : ''}</div>
+      ${q ? `<button class="btn claude" data-action="ask" data-q="${esc(`Suche in meinen Unterlagen nach „${q}“ und erkläre mir, was dort dazu steht – mit Fundstellen.`)}">${icon('sparkles', 'sm')} Assistent fragen</button>` : ''}</div>
     <form class="toolbar" data-submit="doc-search">
       <div class="input-icon" style="max-width:none">${icon('search')}<input id="search-q" class="input" placeholder="z. B. Resonanzfrequenz, &quot;komplexe Impedanz&quot;, Eigenwerte" value="${esc(q)}" /></div>
-      <button class="btn primary">Suchen</button>
+      <button class="btn">Suchen</button>
     </form>
-    ${r && r.hits.length ? `<p class="muted small" style="margin:-6px 0 14px">${r.totalPages} Seiten in ${r.totalFiles} Dokumenten</p>` : ''}
+    ${r && r.hits.length ? `<p class="muted small" style="margin:-6px 0 14px">${r.totalPages} ${r.totalPages === 1 ? 'Seite' : 'Seiten'} in ${r.totalFiles} ${r.totalFiles === 1 ? 'Dokument' : 'Dokumenten'}</p>` : ''}
     <div class="stack" style="gap:14px">${body}</div>
   </div>`;
 }
@@ -2027,15 +2510,15 @@ function renderClaude() {
   if (!el) return;
   el.classList.toggle('closed', !S.ui.claudeOpen);
   const p = PROVIDERS[prov()];
+  const showSet = S.ui.modelOpen || !providerReady();
   el.innerHTML = `
     <div class="cp-head">
       <div class="cp-logo ${p.cls}">${icon(p.icon)}</div>
-      <div class="grow"><b>Lernassistent</b><small>${esc(p.name)} · ${esc(providerModelLabel())}</small></div>
-      <div class="segmented sm-seg">${Object.entries(PROVIDERS).filter(([k]) => !WEB || k === 'claude').map(([k, v]) => `<button class="${prov() === k ? 'on' : ''}" data-action="set-provider" data-v="${k}" title="${v.name} verwenden">${v.name}</button>`).join('')}</div>
-      <button class="icon-btn sm" data-action="chat-new" title="Neuer Chat">${icon('plus')}</button>
-      <button class="icon-btn sm" data-action="toggle-claude" title="Schließen">${icon('x')}</button>
+      <div class="grow"><b>Assistent</b><button class="cp-model-btn ${showSet ? 'on' : ''}" data-action="model-toggle" title="Anbieter, Modell und Antwortstil"><span>${esc(p.name)} · ${esc(providerModelLabel())}</span>${icon('chevdown', 'sm')}</button></div>
+      <button class="icon-btn sm" data-action="chat-new" title="Neuer Chat">${icon('compose', 'sm')}</button>
+      <button class="icon-btn sm" data-action="toggle-claude" title="Schließen">${icon('x', 'sm')}</button>
     </div>
-    ${providerReady() ? modelBar() : ''}
+    ${showSet ? `<div class="cp-settings">${WEB ? '' : `<div class="segmented sm-seg">${Object.entries(PROVIDERS).map(([k, v]) => `<button class="${prov() === k ? 'on' : ''}" data-action="set-provider" data-v="${k}">${v.name}</button>`).join('')}</div>`}${providerReady() ? modelBar() : ''}</div>` : ''}
     <div class="cp-body" id="cp-body"></div>
     <div class="cp-compose" id="cp-compose"></div>`;
   renderChatBody();
@@ -2483,7 +2966,13 @@ const actions = {
     toast('Fertig');
   },
   sync: () => { api.sync(); toast('Synchronisation gestartet'); },
-  'toggle-left': () => { S.ui.leftOpen = !S.ui.leftOpen; renderLeft(); renderMain(); },
+  'toggle-left': () => {
+    if (S.route.name === 'course') S.ui.leftOpenCourse = !S.ui.leftOpenCourse;
+    else S.ui.leftOpen = !S.ui.leftOpen;
+    renderLeft();
+    renderMain();
+  },
+  'model-toggle': () => { S.ui.modelOpen = !S.ui.modelOpen; renderClaude(); },
   'toggle-claude': () => { S.ui.claudeOpen = !S.ui.claudeOpen; $('#claude').classList.toggle('closed', !S.ui.claudeOpen); renderNav(); if (S.ui.claudeOpen) setTimeout(() => $('#chat-input') && $('#chat-input').focus(), 220); },
   dropdown: (el) => { S.ui.dropdown = S.ui.dropdown === el.dataset.dd ? null : el.dataset.dd; renderNav(); },
   'clear-news': async () => { await api.clearNews(); S.data = await api.data(); S.ui.dropdown = null; renderNav(); renderMain(); },
@@ -2591,18 +3080,53 @@ const actions = {
   'open-file-external': (el) => openFile(el.dataset.file, true),
   'viewer-back': () => goBack(),
   back: () => goBack(),
-  'viewer-page': (el) => goToPage(V.page + Number(el.dataset.d)),
+  'viewer-page': (el) => { const d = docOf(el); goToPage(d.page + Number(el.dataset.d), d); },
   'viewer-zoom': (el) => {
-    if (!V.ctl) return;
+    const d = docOf(el);
+    if (!d.ctl) return;
     const z = el.dataset.z;
-    if (z === 'fit') V.ctl.setZoom('fit');
-    else V.ctl.zoomBy(z === 'in' ? 1.2 : 1 / 1.2);
-    updateViewerBar();
+    if (z === 'fit') d.ctl.setZoom('fit');
+    else d.ctl.zoomBy(z === 'in' ? 1.2 : 1 / 1.2);
+    updateViewerBar(d);
   },
-  'viewer-hit': (el) => { V.hitIdx = Number(el.dataset.i); goToPage(V.hits[V.hitIdx].page); },
-  'viewer-hits-close': () => { $('#viewer-hitlist').hidden = true; },
+  'viewer-hit': (el) => { const d = docOf(el); d.hitIdx = Number(el.dataset.i); goToPage(d.hits[d.hitIdx].page, d); updateFind(d); },
+  'viewer-find': (el) => openFind(docOf(el)),
+  'find-close': (el) => closeFind(docOf(el)),
+  'find-step': (el) => {
+    const d = docOf(el);
+    const n = d.hits ? d.hits.length : 0;
+    if (!n) return;
+    d.hitIdx = (d.hitIdx + Number(el.dataset.d) + n) % n;
+    goToPage(d.hits[d.hitIdx].page, d);
+    updateFind(d);
+  },
+  'find-list': (el) => { const list = ref(docOf(el), 'hitlist'); list.hidden = !list.hidden; },
+  'viewer-more': (el) => ($('#vmenu') ? closeMenu() : openMenu(el, docMenuHtml(docOf(el)))),
+  'tab-move': (el) => splitWith(docOf(el)),
+  'split-toggle': () => (D.panes.length > 1 ? actions['split-close']() : splitWith(activeDoc(D.panes[0]))),
+  'viewer-hits-close': (el) => { ref(docOf(el), 'hitlist').hidden = true; },
+  'tab-select': (el) => { const d = docByKey(el.dataset.doc); if (d) { focusTab(d); showDocs(); } },
+  'tab-close': (el) => { const d = docByKey(el.dataset.doc); if (d) closeTab(d); },
+  'tab-add': (el) => openPicker(Number(el.dataset.pane)),
+  // Teilung aufheben: Tabs der rechten Hälfte links anhängen (doppelte schließen)
+  'split-close': () => {
+    if (D.panes.length < 2) return;
+    const [left, right] = D.panes;
+    const keep = V;
+    for (const d of right.docs) {
+      if (findTab(d.fileId, 0)) destroyDoc(d);
+      else left.docs.push(d);
+    }
+    D.panes = [left];
+    left.active = Math.max(0, left.docs.indexOf(keep.el ? keep : activeDoc(left)));
+    D.focus = 0;
+    showDocs();
+  },
+  'pick-doc': (el) => { closeModal(); openDoc(el.dataset.file, 1, '', D.pickPane); },
   'viewer-ask': (el) => {
     openClaude();
+    const d = docOf(el);
+    focusTab(d);
     const f = S.data.files[V.mountedFor];
     if (!f || !providerReady()) return;
     S.chat.ctxOn = true;
@@ -2610,8 +3134,10 @@ const actions = {
     else sendChat(`Erkläre mir Seite ${V.page} von „${f.filename}“ verständlich: worum geht es, was sind die Kernideen, und wie hängen Formeln und Abbildungen zusammen?`);
   },
   'sel-ask': (el) => {
-    const sel = V.sel;
-    $('#sel-bubble').hidden = true;
+    const d = docOf(el);
+    focusTab(d);
+    const sel = d.sel;
+    ref(d, 'bubble').hidden = true;
     if (!sel) return;
     if (el.dataset.mode === 'search') return runSearch(sel.text.slice(0, 120));
     openClaude();
@@ -2638,7 +3164,9 @@ const actions = {
     S.state = await api.state();
     S.data = null;
     unmountViewer();
-    S.chats = { claude: newChat(), chatgpt: newChat() };
+    D.panes = [];
+    V = NO_DOC;
+    S.chats ={ claude: newChat(), chatgpt: newChat() };
     S.route = { name: 'dashboard', params: {} };
     S.history = [];
     render();
@@ -2704,6 +3232,7 @@ function closeModal() {
 
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-action]');
+  if (!el || el.dataset.action !== 'viewer-more') closeMenu();
   if (el) {
     e.preventDefault();
     e.stopPropagation();
@@ -2738,8 +3267,9 @@ document.addEventListener('click', (e) => {
     return;
   }
   if (S.ui.dropdown && !e.target.closest('.dropdown')) { S.ui.dropdown = null; renderNav(); }
-  const bubble = $('#sel-bubble');
-  if (bubble && !e.target.closest('#sel-bubble') && !String(window.getSelection() || '').trim()) bubble.hidden = true;
+  if (!e.target.closest('.sel-bubble') && !String(window.getSelection() || '').trim()) {
+    document.querySelectorAll('.sel-bubble:not([hidden])').forEach((b) => { b.hidden = true; });
+  }
 });
 
 document.addEventListener('submit', (e) => {
@@ -2754,6 +3284,7 @@ document.addEventListener('input', (e) => {
   const k = e.target.dataset && e.target.dataset.input;
   if (k === 'course-search') { S.ui.courseSearch = e.target.value; renderMain(); }
   else if (k === 'file-search') { S.ui.fileSearch = e.target.value; renderMain(); }
+  else if (k === 'pick-q') $('#pick-list').innerHTML = pickList(e.target.value);
   else if (k === 'tt-form') S.tt.form[e.target.dataset.key] = e.target.value;
   else if (k === 'mensa-form') S.mensa.form = e.target.value;
   else if (k === 'mensa-contact') {
@@ -2787,24 +3318,62 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     sendWithSelection();
   }
-  if (e.target.id === 'viewer-page' && e.key === 'Enter') {
+  if (e.target.dataset && e.target.dataset.ref === 'q' && (e.key === 'Escape' || (e.key === 'Enter' && e.shiftKey))) {
     e.preventDefault();
-    goToPage(Number(e.target.value) || 1);
+    e.stopPropagation();
+    const d = docOf(e.target);
+    if (e.key === 'Escape') { closeFind(d); return; }
+    const n = d.hits ? d.hits.length : 0;
+    if (n) { d.hitIdx = (d.hitIdx - 1 + n) % n; goToPage(d.hits[d.hitIdx].page, d); updateFind(d); }
+    return;
+  }
+  if (e.target.closest && e.target.closest('#vmenu') && ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+    e.preventDefault();
+    const items = [...$('#vmenu').querySelectorAll('button')];
+    const i = items.indexOf(e.target);
+    const next = items[(i + (e.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length];
+    if (next && e.key.startsWith('Arrow') && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) next.focus();
+    return;
+  }
+  if (e.target.dataset && e.target.dataset.ref === 'page' && e.key === 'Enter') {
+    e.preventDefault();
+    goToPage(Number(e.target.value) || 1, docOf(e.target));
+  }
+  if (e.target.id === 'pick-q' && (e.key === 'Enter' || e.key === 'ArrowDown')) {
+    e.preventDefault();
+    const first = $('#pick-list .pick-item');
+    if (first && e.key === 'Enter') first.click();
+    else if (first) first.focus();
+  }
+  if (e.target.classList && e.target.classList.contains('pick-item') && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault();
+    const sib = e.key === 'ArrowDown' ? e.target.nextElementSibling : e.target.previousElementSibling;
+    if (sib) sib.focus();
+    else if (e.key === 'ArrowUp') $('#pick-q').focus();
+  }
+  // Strg+Tab / Strg+Umschalt+Tab: Tabs der aktiven Hälfte durchblättern
+  if (S.route.name === 'viewer' && e.ctrlKey && e.key === 'Tab' && D.panes[D.focus]) {
+    e.preventDefault();
+    const p = D.panes[D.focus];
+    p.active = (p.active + (e.shiftKey ? -1 : 1) + p.docs.length) % p.docs.length;
+    showDocs();
   }
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f' && S.state && S.state.loggedIn) {
     e.preventDefault();
     const q = $('#nav-q');
     if (q) { q.focus(); q.select(); }
   } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && S.route.name === 'viewer') {
-    e.preventDefault();
-    $('#viewer-q').focus();
-    $('#viewer-q').select();
+    if (ref(V, 'q')) {
+      e.preventDefault();
+      openFind(V);
+    }
   }
   if (S.route.name === 'viewer' && (e.ctrlKey || e.metaKey) && V.ctl && ['+', '=', '-', '0'].includes(e.key)) {
     e.preventDefault();
     if (e.key === '0') V.ctl.setZoom('fit');
     else V.ctl.zoomBy(e.key === '-' ? 1 / 1.2 : 1.2);
     updateViewerBar();
+    showHud(V);
   }
   if (S.route.name === 'viewer' && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) {
     if (e.key === 'PageDown' || e.key === 'ArrowRight') { e.preventDefault(); goToPage(V.page + 1); }
@@ -2815,7 +3384,8 @@ document.addEventListener('keydown', (e) => {
     actions['toggle-claude']();
   }
   if (e.key === 'Escape') {
-    if ($('#modal')) closeModal();
+    if ($('#vmenu')) closeMenu();
+    else if ($('#modal')) closeModal();
     else if (S.ui.dropdown) { S.ui.dropdown = null; renderNav(); }
   }
 });
