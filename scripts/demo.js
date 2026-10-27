@@ -236,6 +236,13 @@ async function shots() {
   await wait(800);
   console.log('TABS nach Schließen', await run(`JSON.stringify(D.panes.map((p) => p.docs.length))`), 'aktiv:', await run('V.fileId && S.data.files[V.fileId].filename'));
   await snap('12f-ein-tab');
+  // Bereich wechseln und über „Dokumente“ in der Navbar zurück zum offenen Tab
+  await run(`document.querySelector('[data-route=mensa]').click()`);
+  await snap('12g-mensa-mit-dokument');
+  await run(`document.querySelector('#nav-docs').click()`);
+  await wait(1500);
+  console.log('ZURÜCK zum Dokument', await run(`S.route.name + ' ' + (V.fileId && S.data.files[V.fileId].filename) + ' S. ' + V.page`));
+  await snap('12h-zurueck-im-dokument');
   await run(`if (document.querySelector('#claude').classList.contains('closed')) document.querySelector('.claude-toggle').click(); if (!document.querySelector('.cp-settings')) document.querySelector('[data-action=model-toggle]').click(); document.querySelector('[data-action=set-provider][data-v=chatgpt]').click()`);
   await wait(800);
   await snap('13-chatgpt-panel');

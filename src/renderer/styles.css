@@ -297,6 +297,7 @@ h1, h2, h3, h4 { font-family: var(--font-display); margin: 0; line-height: 1.2; 
 }
 .primary-nav a:hover { color: var(--text); text-decoration: none; }
 .primary-nav a.active { color: var(--text); font-weight: 600; background: var(--seg-on); box-shadow: 0 1px 3px rgba(0,0,0,.12), 0 0 0 .5px rgba(0,0,0,.04); }
+.nav-count { margin-left: 6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; display: inline-grid; place-items: center; background: var(--fill-strong); color: var(--text-2); font-size: 11px; font-weight: 600; }
 .navbar .spacer { flex: 1; }
 /* Knöpfe, Icons und Profilbild behalten ihre Größe; schrumpfen dürfen nur Texte und das Suchfeld */
 .navbar .brand-mark, .navbar .icon-btn, .navbar .avatar, .claude-toggle, .primary-nav { flex: none; }
@@ -782,7 +783,6 @@ h1, h2, h3, h4 { font-family: var(--font-display); margin: 0; line-height: 1.2; 
 .vtab.drop-before::before { left: -2px; }
 .vtab.drop-after::after { right: -2px; }
 .vt-tools { display: flex; align-items: center; gap: 2px; transition: opacity .15s; }
-.vt-tools .vb-ask { height: 26px; padding: 0 10px; }
 .vt-split { margin-left: 2px; }
 .vt-split.active { background: var(--fill-strong); color: var(--text); }
 /* Nicht aktive Hälfte tritt zurück: Werkzeuge erst beim Darüberfahren */
@@ -797,9 +797,6 @@ h1, h2, h3, h4 { font-family: var(--font-display); margin: 0; line-height: 1.2; 
 .vpane-docs > .viewer { position: absolute; inset: 0; }
 .viewer.inactive { visibility: hidden; }
 .viewer { position: relative; display: flex; flex-direction: column; height: 100%; container-type: inline-size; }
-@container (max-width: 520px) {
-  .vb-ask span { display: none; }
-}
 
 /* Suchleiste */
 .vfind {

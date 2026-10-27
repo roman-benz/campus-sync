@@ -497,10 +497,11 @@ function renderNav() {
     </div>
     <nav class="primary-nav">
       <a href="#" data-action="go" data-route="dashboard" class="${r === 'dashboard' ? 'active' : ''}">Übersicht</a>
-      <a href="#" data-action="go" data-route="courses" class="${['courses', 'course', 'module', 'viewer'].includes(r) ? 'active' : ''}">Kurse</a>
+      <a href="#" data-action="go" data-route="courses" class="${['courses', 'course', 'module'].includes(r) ? 'active' : ''}">Kurse</a>
       <a href="#" data-action="go" data-route="events" class="${r === 'events' ? 'active' : ''}">Fristen</a>
       <a href="#" data-action="go" data-route="timetable" class="${r === 'timetable' ? 'active' : ''}">Stundenplan</a>
       <a href="#" data-action="go" data-route="mensa" class="${r === 'mensa' ? 'active' : ''}">Mensa</a>
+      ${navDocsHtml()}
     </nav>
     <form class="nav-search" data-submit="nav-search"><div class="input-icon">${icon('search', 'sm')}<input id="nav-q" class="input" placeholder="In Dokumenten suchen…" title="Strg+Umschalt+F" value="${esc(r === 'search' ? S.route.params.q || '' : '')}" /></div></form>
     <div class="spacer"></div>
@@ -510,6 +511,25 @@ function renderNav() {
     <button class="avatar" data-action="dropdown" data-dd="user" title="${esc(site.fullname)}">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</button>
     ${S.ui.dropdown ? renderDropdown() : ''}`;
   renderSyncPill();
+}
+
+// Offene Tabs bleiben beim Wechsel in einen anderen Bereich erhalten; „Dokumente“ führt dorthin zurück
+function navDocsHtml() {
+  const n = D.panes.reduce((s, p) => s + p.docs.length, 0);
+  if (!n) return '';
+  const cur = activeDoc(D.panes[D.focus]);
+  const f = cur && S.data.files[cur.fileId];
+  const tip = `Geöffnete Dokumente${f ? ` – zuletzt: ${docTitle(f)}` : ''}`;
+  return `<a href="#" id="nav-docs" data-action="go-docs" class="${S.route.name === 'viewer' ? 'active' : ''}" title="${esc(tip)}">Dokumente${n > 1 ? `<span class="nav-count">${n}</span>` : ''}</a>`;
+}
+
+// Nur den Eintrag „Dokumente“ aktualisieren (Tabs ändern sich, ohne dass die Navbar neu entsteht)
+function renderNavDocs() {
+  const nav = $('#nav .primary-nav');
+  if (!nav) return;
+  const old = $('#nav-docs');
+  if (old) old.remove();
+  nav.insertAdjacentHTML('beforeend', navDocsHtml());
 }
 
 function renderSyncPill() {
@@ -1812,7 +1832,6 @@ function tabsHtml(p, i) {
     <div class="spacer"></div>
     ${cur ? `<div class="vt-tools">
       <button class="icon-btn sm" data-action="viewer-find" data-doc="${cur.key}" title="Im Dokument suchen (Strg+F)">${icon('search', 'sm')}</button>
-      <button class="btn sm claude vb-ask" data-action="viewer-ask" data-mode="page" data-doc="${cur.key}" title="Aktuelle Seite vom Assistenten erklären lassen">${icon('sparkles', 'sm')}<span>Erklären</span></button>
       <button class="icon-btn sm" data-action="viewer-more" data-doc="${cur.key}" title="Weitere Aktionen">${icon('more', 'sm')}</button>
     </div>` : ''}
     ${i === 0
@@ -1927,6 +1946,7 @@ function docMenuHtml(d) {
   const split = D.panes.length > 1;
   const item = (action, ic, label, attrs = '') => `<button class="vmenu-item" role="menuitem" data-action="${action}" data-doc="${d.key}" ${attrs}>${icon(ic, 'sm')}<span>${label}</span></button>`;
   return [
+    item('viewer-ask', 'sparkles', 'Diese Seite erklären', 'data-mode="page"'),
     item('viewer-ask', 'list', 'Dokument zusammenfassen', 'data-mode="summary"'),
     f && isPdf(f) ? item('viewer-zoom', 'fit', 'An Breite anpassen', 'data-z="fit"') : '',
     '<div class="vmenu-sep"></div>',
@@ -2012,6 +2032,7 @@ function showDocs() {
     s.remove();
   }
   fresh.forEach((d) => { wireDoc(d); mountDoc(d); });
+  renderNavDocs();
   if (V !== before) renderClaudeContext();
 }
 
@@ -2932,6 +2953,10 @@ const actions = {
   go: (el) => {
     if (el.dataset.tab) S.ui.settingsTab = el.dataset.tab;
     go(el.dataset.route);
+  },
+  'go-docs': () => {
+    const d = activeDoc(D.panes[D.focus]);
+    if (d && S.route.name !== 'viewer') go('viewer', { fileId: d.fileId });
   },
   course: (el) => go('course', { id: Number(el.dataset.id), tab: 'content' }),
   'course-tab': (el) => go('course', { ...S.route.params, tab: el.dataset.v }),
