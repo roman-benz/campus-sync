@@ -42,7 +42,8 @@ const S = {
   // Mensa: Speiseplan, gewählter Tag, Stundenplan des Tags; Bestellen: Warenkorb je Tag (a_id → Anzahl),
   // Abholzeiten/Restmengen des Tags (opt), gewählte Abholzeit je Tag, Kontaktdaten, eigene Bestellungen
   mensa: { data: null, day: null, busy: false, error: '', url: null, defaultUrl: null, form: '', tt: null, cart: {}, opt: null, time: {}, contact: null, agree: false, sending: false, orders: null },
-  tt: { list: null, active: null, template: null, week: ttMonday(new Date()), events: [], loadedKey: null, busy: false, form: { name: '', url: '' } },
+  // Verschiebevorschlag: Bemerkung und Empfänger im Dialog, zuletzt gebaute Mail (proposal)
+  tt: { list: null, active: null, template: null, week: ttMonday(new Date()), events: [], loadedKey: null, busy: false, form: { name: '', url: '' }, note: '', to: null, proposal: null },
 };
 // Aktiver Chat = Chat des gewählten KI-Anbieters
 Object.defineProperty(S, 'chat', { get: () => S.chats[prov()] });
@@ -1383,6 +1384,27 @@ function ttColor(title) {
   return h % 8;
 }
 
+// Verschiebevorschläge je Stundenplan: Termin-ID → alte und neue Zeit. Sie bleiben auf diesem Gerät
+// (Einstellung ttMoves, nicht im Konto abgeglichen); der Stundenplan selbst bleibt unverändert.
+const ttMoves = () => ((S.state.settings.ttMoves || {})[S.tt.active] || {});
+function ttSaveSetting(patch) {
+  // Antwort des Hauptprozesses übernehmen, ohne inzwischen geänderte Vorschläge zu überschreiben
+  return api.setSettings(patch).then((s) => { S.state.settings = { ...s, ttMoves: S.state.settings.ttMoves }; });
+}
+function ttSaveMoves(map) {
+  const all = { ...(S.state.settings.ttMoves || {}) };
+  if (Object.keys(map).length) all[S.tt.active] = map;
+  else delete all[S.tt.active];
+  S.state.settings.ttMoves = all;
+  ttSaveSetting({ ttMoves: all }).catch(() => toast('Verschiebung konnte nicht gespeichert werden', true));
+}
+function ttSetMove(e, start, end) {
+  const map = { ...ttMoves() };
+  if (start === e.start && end === e.end) delete map[e.id];
+  else map[e.id] = { id: e.id, title: e.title, location: e.location, start: e.start, end: e.end, newStart: start, newEnd: end };
+  ttSaveMoves(map);
+}
+
 async function loadTimetable(force = false) {
   const t = S.tt;
   if (!t.list || force) {
@@ -1527,19 +1549,40 @@ function renderTimetable() {
   let grid;
   if (!t.list) grid = `<div class="card"><div class="empty">${icon('refresh', 'spin')}<div>Lade Stundenplan…</div></div></div>`;
   else if (!plan) grid = `<div class="card"><div class="empty">${icon('calendar')}<div>Noch kein Stundenplan eingetragen. Füge unten einen Rapla- oder iCal-Link hinzu.</div></div></div>`;
-  else grid = `<div class="card tt-progress" id="tt-progress">${ttProgressHtml()}</div>${ttWeekGrid(t.events, range)}`;
+  else grid = `<div class="card tt-progress" id="tt-progress">${ttProgressHtml()}</div>${ttProposalBar()}${ttWeekGrid(t.events, range)}`;
 
   return `<div class="page wide">${head}${grid}${ttManageCard()}</div>`;
 }
 
+// Leiste über der Woche, solange es verschobene Stunden gibt (in allen Wochen des Plans)
+function ttProposalBar() {
+  const list = Object.values(ttMoves());
+  if (!list.length) return '';
+  const weeks = [...new Set(list.map((m) => ttIsoWeek(m.start)))].sort((a, b) => a - b);
+  return `<div class="card tt-proposal">
+    ${icon('swap')}
+    <div class="grow"><b>${list.length === 1 ? '1 Stunde verschoben' : `${list.length} Stunden verschoben`}</b><small>Nur ein Vorschlag – dein Stundenplan bleibt unverändert · KW ${weeks.join(', ')}</small></div>
+    <button class="btn sm ghost" data-action="tt-moves-reset">Zurücksetzen</button>
+    <button class="btn sm primary" data-action="tt-propose">${icon('message', 'sm')} Als Vorschlag senden</button>
+  </div>`;
+}
+
 function ttWeekGrid(events, range) {
   const t = S.tt;
+  const moves = ttMoves();
   const timed = events.filter((e) => !e.allDay);
   const allDay = events.filter((e) => e.allDay);
-  const weekend = timed.some((e) => e.start >= ttAddDays(t.week, 5));
+  // Verschobene Stunden stehen an der neuen Stelle, an der alten bleibt ein blasser Platzhalter
+  const items = [];
+  for (const e of timed) {
+    const m = moves[e.id];
+    if (m) items.push({ ev: e, kind: 'ghost', start: e.start, end: e.end }, { ev: e, kind: 'moved', start: m.newStart, end: m.newEnd });
+    else items.push({ ev: e, kind: 'ev', start: e.start, end: e.end });
+  }
+  const weekend = items.some((x) => x.start >= ttAddDays(t.week, 5));
   const nDays = weekend ? 7 : 5;
-  const from = Math.max(6, Math.min(8, ...timed.map((e) => Math.floor(ttHourOf(e.start)))));
-  const to = Math.min(24, Math.max(18, ...timed.map((e) => Math.ceil(ttHourOf(e.end) || 24))));
+  const from = Math.max(6, Math.min(8, ...items.map((x) => Math.floor(ttHourOf(x.start)))));
+  const to = Math.min(24, Math.max(18, ...items.map((x) => Math.ceil(ttHourOf(x.end) || 24))));
   const height = (to - from) * TT_HOUR_PX;
   const today = new Date().setHours(0, 0, 0, 0);
 
@@ -1547,19 +1590,24 @@ function ttWeekGrid(events, range) {
   for (let i = 0; i < nDays; i++) {
     const day = ttAddDays(t.week, i);
     const next = ttAddDays(day, 1);
-    const dayEvents = timed.filter((e) => e.start >= day && e.start < next);
+    const dayItems = items.filter((x) => x.start >= day && x.start < next);
     const holidays = allDay.filter((e) => e.start < next && e.end > day);
-    const blocks = ttLayoutDay(dayEvents).map(({ e, lane, lanes }) => {
-      const top = (ttHourOf(e.start) - from) * TT_HOUR_PX;
-      const h = Math.max(22, ((e.end - e.start) / 3600000) * TT_HOUR_PX - 3);
+    const blocks = ttLayoutDay(dayItems).map(({ e: x, lane, lanes }) => {
+      const e = x.ev;
+      const top = (ttHourOf(x.start) - from) * TT_HOUR_PX;
+      const h = Math.max(22, ((x.end - x.start) / 3600000) * TT_HOUR_PX - 3);
       const room = e.location.split(/\s+/)[0] || '';
-      const tip = [e.title, `${ttClock(e.start)}–${ttClock(e.end)}`, e.location, e.persons.join(', ')].filter(Boolean).join('\n');
-      return `<button class="tt-ev c${ttColor(e.title)}${e.end < Date.now() ? ' past' : ''}${h < 44 ? ' short' : ''}" style="top:${top}px;height:${h}px;left:calc(${(lane / lanes) * 100}% + 2px);width:calc(${100 / lanes}% - 4px)" data-action="tt-event" data-i="${t.events.indexOf(e)}" title="${esc(tip)}">
-        <b>${esc(e.title)}</b><span class="tt-meta">${ttClock(e.start)}–${ttClock(e.end)}${room ? ` · ${esc(room)}` : ''}</span>${h > 80 && e.persons.length ? `<span class="tt-who">${esc(e.persons.join(', '))}</span>` : ''}
+      const pos = `top:${top}px;height:${h}px;left:calc(${(lane / lanes) * 100}% + 2px);width:calc(${100 / lanes}% - 4px)`;
+      const cls = `tt-ev c${ttColor(e.title)}${x.kind === 'ev' && x.end < Date.now() ? ' past' : ''}${h < 44 ? ' short' : ''}`;
+      if (x.kind === 'ghost') return `<div class="${cls} ghost" style="${pos}" aria-hidden="true"><b>${esc(e.title)}</b><span class="tt-meta">bisher ${ttClock(e.start)}–${ttClock(e.end)}</span></div>`;
+      const moved = x.kind === 'moved';
+      const tip = [e.title, `${ttClock(x.start)}–${ttClock(x.end)}`, moved ? `Vorschlag, bisher ${TTP.span(e.start, e.end)}` : '', e.location, e.persons.join(', '), 'Ziehen zum Verschieben'].filter(Boolean).join('\n');
+      return `<button class="${cls}${moved ? ' moved' : ''}" style="${pos}" data-action="tt-event" data-i="${t.events.indexOf(e)}" title="${esc(tip)}">
+        <b>${esc(e.title)}</b><span class="tt-meta">${ttClock(x.start)}–${ttClock(x.end)}${room ? ` · ${esc(room)}` : ''}</span>${h > 80 && e.persons.length ? `<span class="tt-who">${esc(e.persons.join(', '))}</span>` : ''}
       </button>`;
     }).join('');
     const isToday = day === today;
-    cols.push(`<div class="tt-col${isToday ? ' today' : ''}">
+    cols.push(`<div class="tt-col${isToday ? ' today' : ''}" data-day="${day}">
       <div class="tt-day"><span>${TT_DAYS[i].slice(0, 2)}</span><b>${new Date(day).getDate()}.</b>${holidays.map((e) => `<em class="tt-holiday" title="${esc(e.title)}">${esc(e.title)}</em>`).join('')}</div>
       <div class="tt-body" style="height:${height}px">${blocks}${isToday ? `<div class="tt-now" id="tt-now" data-from="${from}" data-max="${height}" hidden></div>` : ''}</div>
     </div>`);
@@ -1568,8 +1616,8 @@ function ttWeekGrid(events, range) {
   for (let h = from; h < to; h++) hours.push(`<div class="tt-hour" style="top:${(h - from) * TT_HOUR_PX}px">${String(h).padStart(2, '0')}:00</div>`);
   setTimeout(placeNowLine);
   return `<div class="card tt-card">
-    <div class="tt-range"><b>KW ${ttIsoWeek(t.week)}</b><span>${range}</span><span class="muted">${timed.length} ${timed.length === 1 ? 'Termin' : 'Termine'}</span></div>
-    <div class="tt-grid" style="--days:${nDays}">
+    <div class="tt-range"><b>KW ${ttIsoWeek(t.week)}</b><span>${range}</span><span class="muted">${timed.length} ${timed.length === 1 ? 'Termin' : 'Termine'} · Stunden zum Verschieben ziehen</span></div>
+    <div class="tt-grid" style="--days:${nDays}" data-from="${from}" data-to="${to}">
       <div class="tt-gutter"><div class="tt-day"></div><div class="tt-body" style="height:${height}px">${hours.join('')}</div></div>
       ${cols.join('')}
     </div>
@@ -1595,6 +1643,166 @@ function ttManageCard() {
       <p class="muted small" style="margin:10px 0 0">Funktioniert mit Rapla-Links der DHBW (Ansicht oder Export) und mit jedem iCal-Kalender. Der Plan wird lokal gespeichert, ist offline verfügbar und wird alle zwei Stunden aktualisiert.</p>
     </div>
   </div>`;
+}
+
+// ---------- Stundenplan: Stunden per Drag & Drop verschieben ----------
+// Mit Maus und Stift; auf Touch scrollt die Seite wie bisher. Erst ab ein paar Pixeln Bewegung wird
+// gezogen, ein Klick öffnet weiter die Details. Esc oder Loslassen neben dem Plan bricht ab.
+const TTD = { drag: null, swallowClick: false };
+
+document.addEventListener('pointerdown', (e) => {
+  if (S.route.name !== 'timetable' || e.button !== 0 || e.pointerType === 'touch') return;
+  const el = e.target.closest && e.target.closest('button.tt-ev[data-i]');
+  const ev = el && S.tt.events[Number(el.dataset.i)];
+  if (!ev) return;
+  const m = ttMoves()[ev.id];
+  TTD.drag = { el, ev, id: e.pointerId, x0: e.clientX, y0: e.clientY, grabY: e.clientY - el.getBoundingClientRect().top, start: m ? m.newStart : ev.start, duration: ev.end - ev.start, started: false, target: null };
+});
+document.addEventListener('pointermove', (e) => {
+  const d = TTD.drag;
+  if (!d || e.pointerId !== d.id) return;
+  if (!d.started) {
+    if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 5) return;
+    ttDragBegin(d);
+  }
+  if (!d.el.isConnected) return ttDragEnd(false); // Plan wurde inzwischen neu aufgebaut
+  ttDragMove(d, e.clientX, e.clientY);
+});
+document.addEventListener('pointerup', (e) => TTD.drag && e.pointerId === TTD.drag.id && ttDragEnd(true));
+document.addEventListener('pointercancel', (e) => TTD.drag && e.pointerId === TTD.drag.id && ttDragEnd(false));
+window.addEventListener('blur', () => TTD.drag && ttDragEnd(false));
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !TTD.drag || !TTD.drag.started) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  ttDragEnd(false);
+}, true);
+// Nach dem Ziehen keinen Klick auslösen (sonst ginge das Detailfenster auf)
+window.addEventListener('click', (e) => {
+  if (!TTD.swallowClick) return;
+  TTD.swallowClick = false;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+}, true);
+
+function ttDragBegin(d) {
+  d.started = true;
+  try { d.el.setPointerCapture(d.id); } catch {}
+  d.grid = $('.tt-grid');
+  d.from = Number(d.grid.dataset.from);
+  d.to = Number(d.grid.dataset.to);
+  d.cols = [...d.grid.querySelectorAll('.tt-col[data-day]')];
+  d.float = d.el.cloneNode(true);
+  d.float.classList.add('tt-float');
+  d.float.classList.remove('past', 'moved');
+  d.float.removeAttribute('data-action');
+  d.float.removeAttribute('title');
+  d.float.style.height = `${d.el.offsetHeight}px`;
+  document.body.appendChild(d.float);
+  d.el.classList.add('drag-src');
+  d.grid.classList.add('dragging');
+  document.body.classList.add('tt-grabbing');
+}
+
+function ttDragMove(d, x, y) {
+  const box = d.grid.getBoundingClientRect();
+  const outside = x < box.left - 40 || x > box.right + 40 || y < box.top - 40 || y > box.bottom + 40;
+  const rects = d.cols.map((c) => c.querySelector('.tt-body').getBoundingClientRect());
+  let i = rects.findIndex((r) => x >= r.left && x < r.right);
+  if (i < 0) i = x < rects[0].left ? 0 : rects.length - 1;
+  const r = rects[i];
+  const start = TTP.dropStart({ day: Number(d.cols[i].dataset.day), fromHour: d.from, toHour: d.to, y: y - d.grabY - r.top, hourPx: TT_HOUR_PX, duration: d.duration });
+  d.target = outside ? null : { start, end: start + d.duration };
+  Object.assign(d.float.style, { left: `${r.left + 2}px`, top: `${r.top + (ttHourOf(start) - d.from) * TT_HOUR_PX}px`, width: `${r.width - 4}px` });
+  d.float.classList.toggle('invalid', outside);
+  const meta = d.float.querySelector('.tt-meta');
+  if (meta) meta.textContent = `${TT_DAYS[(new Date(start).getDay() + 6) % 7].slice(0, 2)} ${ttClock(start)}–${ttClock(start + d.duration)}`;
+  d.cols.forEach((c, j) => c.classList.toggle('drop', !outside && j === i));
+}
+
+function ttDragEnd(commit) {
+  const d = TTD.drag;
+  TTD.drag = null;
+  if (!d || !d.started) return;
+  d.float.remove();
+  d.el.classList.remove('drag-src');
+  d.grid.classList.remove('dragging');
+  d.cols.forEach((c) => c.classList.remove('drop'));
+  document.body.classList.remove('tt-grabbing');
+  TTD.swallowClick = true;
+  setTimeout(() => { TTD.swallowClick = false; }, 0);
+  if (commit && d.target && d.target.start !== d.start) {
+    ttSetMove(d.ev, d.target.start, d.target.end);
+    renderMain();
+  }
+}
+
+// ---------- Stundenplan: Vorschlag per Mail ----------
+// Die App baut eine fertige Mail an den Kurssprecher (mailto: Empfänger, Betreff, Text) und öffnet
+// das Mailprogramm; abgeschickt wird dort. Die Übersicht als Grafik kommt zusätzlich in die
+// Zwischenablage, weil mailto-Links nur reinen Text übergeben können.
+async function ttProposeDialog() {
+  const t = S.tt;
+  const plan = t.list && t.list.find((x) => x.id === t.active);
+  const moves = Object.values(ttMoves()).sort((a, b) => a.start - b.start);
+  if (!plan || !moves.length) return closeModal();
+  // Unveränderte Termine der betroffenen Wochen, damit die Übersicht zeigt, was drumherum liegt
+  const weeks = [...new Set(moves.flatMap((m) => [ttMonday(m.start), ttMonday(m.newStart)]))];
+  const context = (await Promise.all(weeks.map((w) => (w === t.week ? t.events : api.ttEvents(t.active, w, ttAddDays(w, 7)))))).flat();
+  if (t.to == null) t.to = S.state.settings.ttProposalTo || (t.template && plan.url === t.template.url && t.template.proposalTo) || '';
+  t.proposal = { plan, moves, context };
+  showModal(`<div class="ttp-dialog">
+    <h3>Verschiebevorschlag senden</h3>
+    <p>Dein Mailprogramm öffnet sich mit einer fertigen Mail. Du musst sie nur noch abschicken.</p>
+    <div class="field"><label for="ttp-to">An (Kurssprecher)</label><input class="input" id="ttp-to" type="email" data-input="ttp-to" value="${esc(t.to)}" placeholder="kurssprecher@…" autocomplete="email" /></div>
+    <div class="ttp-preview">${TTP.overviewHtml({ planName: plan.name, moves, context })}</div>
+    <ul class="ttp-list">${moves.map((m) => `<li><div class="grow"><b>${esc(m.title)}</b><small>${esc(TTP.span(m.start, m.end))} → <b>${esc(TTP.span(m.newStart, m.newEnd))}</b></small></div><button class="icon-btn sm" data-action="tt-move-undo" data-id="${esc(m.id)}" title="Diese Verschiebung zurücknehmen">${icon('x', 'sm')}</button></li>`).join('')}</ul>
+    <div class="field"><label for="ttp-note">Bemerkung <span class="muted">(optional)</span></label><textarea class="textarea" id="ttp-note" data-input="ttp-note" rows="3" maxlength="1000" placeholder="z. B. warum der neue Termin besser passt">${esc(t.note)}</textarea></div>
+    <p class="muted small">Die Übersicht als Grafik kommt zusätzlich in die Zwischenablage. Mit Strg+V kannst du sie in die Mail einfügen.</p>
+    <div class="row"><button class="btn" data-action="modal-close">Abbrechen</button><button class="btn primary" data-action="tt-propose-open">${icon('external', 'sm')} Mail öffnen</button></div>
+  </div>`);
+  $('#modal .modal').classList.add('wide');
+}
+
+async function ttCopy(html, text) {
+  try {
+    const item = { 'text/plain': new Blob([text], { type: 'text/plain' }) };
+    if (html) item['text/html'] = new Blob([`<html><body>${html}</body></html>`], { type: 'text/html' });
+    await navigator.clipboard.write([new ClipboardItem(item)]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function ttProposeOpen() {
+  const t = S.tt;
+  const p = t.proposal;
+  if (!p) return;
+  const to = String(t.to || '').trim();
+  if (!TTP.validEmail(to)) {
+    toast('Bitte die E-Mail-Adresse des Kurssprechers eintragen', true);
+    if ($('#ttp-to')) $('#ttp-to').focus();
+    return;
+  }
+  const sender = (S.data && S.data.site && S.data.site.fullname) || '';
+  const mail = TTP.buildMail({ to, planName: p.plan.name, moves: p.moves, note: t.note, sender });
+  p.mail = mail;
+  const html = TTP.overviewHtml({ planName: p.plan.name, moves: p.moves, context: p.context, note: t.note, withText: mail.shortened });
+  // Erst die Zwischenablage (geht nur, solange das Fenster vorne ist), dann das Mailprogramm
+  const copied = await Promise.race([ttCopy(html, mail.text), new Promise((r) => setTimeout(() => r(false), 1000))]);
+  api.openMail(mail.url);
+  if (to !== (S.state.settings.ttProposalTo || '')) ttSaveSetting({ ttProposalTo: to }).catch(() => {});
+  const dlg = $('#modal .ttp-dialog');
+  if (!dlg) return;
+  $('#modal .modal').classList.remove('wide');
+  const paste = mail.shortened
+    ? (copied ? 'Weil es viele Änderungen sind, stehen Liste und Übersicht in der Zwischenablage: in der Mail mit <b>Strg+V</b> einfügen.' : 'Weil es viele Änderungen sind, passt die Liste nicht in den Link. Kopiere sie mit „Text kopieren“ in die Mail.')
+    : (copied ? 'Mit <b>Strg+V</b> kannst du noch die Übersicht als Grafik einfügen.' : '');
+  dlg.innerHTML = `<h3>Mail ist fertig</h3>
+    <p>Dein Mailprogramm sollte sich jetzt mit der Mail an ${esc(to)} geöffnet haben. ${paste}</p>
+    <p>Abgeschickt? Dann kannst du die Verschiebungen hier zurücksetzen. Öffnet sich kein Mailprogramm, kopiere den Text und schick ihn selbst.</p>
+    <div class="row"><button class="btn ghost" data-action="tt-propose-copy">${icon('copy', 'sm')} Text kopieren</button><button class="btn" data-action="modal-close">Behalten</button><button class="btn primary" data-action="tt-propose-done">Zurücksetzen</button></div>`;
 }
 
 function renderEventsPage() {
@@ -2942,13 +3150,45 @@ const actions = {
   'tt-event': (el) => {
     const e = S.tt.events[Number(el.dataset.i)];
     if (!e) return;
+    const m = ttMoves()[e.id];
     const day = new Date(e.start).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
     showModal(`<h3>${esc(e.title)}</h3>
       <dl class="kv"><dt>Wann</dt><dd>${day}, ${ttClock(e.start)}–${ttClock(e.end)}</dd>
+      ${m ? `<dt>Vorschlag</dt><dd>${esc(TTP.span(m.newStart, m.newEnd))}</dd>` : ''}
       ${e.location ? `<dt>Raum</dt><dd>${esc(e.location)}</dd>` : ''}
       ${e.persons.length ? `<dt>Dozent</dt><dd>${esc(e.persons.join(', '))}</dd>` : ''}
       ${e.category ? `<dt>Art</dt><dd>${esc(e.category)}</dd>` : ''}</dl>
-      <div class="row"><button class="btn" data-action="modal-close">Schließen</button></div>`);
+      <div class="row">${m ? `<button class="btn ghost" data-action="tt-move-undo" data-id="${esc(e.id)}">Verschiebung zurücknehmen</button>` : ''}<button class="btn" data-action="modal-close">Schließen</button></div>`);
+  },
+  'tt-move-undo': (el) => {
+    const map = { ...ttMoves() };
+    delete map[el.dataset.id];
+    ttSaveMoves(map);
+    if ($('#modal .ttp-dialog')) ttProposeDialog();
+    else closeModal();
+    renderMain();
+  },
+  'tt-moves-reset': () => {
+    const n = Object.keys(ttMoves()).length;
+    if (!n || !confirm(n === 1 ? 'Die Verschiebung verwerfen?' : `Alle ${n} Verschiebungen verwerfen?`)) return;
+    ttSaveMoves({});
+    renderMain();
+  },
+  'tt-propose': () => ttProposeDialog(),
+  'tt-propose-open': () => ttProposeOpen(),
+  'tt-propose-copy': async () => {
+    const p = S.tt.proposal;
+    if (!p || !p.mail) return;
+    const ok = await ttCopy(null, `An: ${S.tt.to}\nBetreff: ${p.mail.subject}\n\n${p.mail.text}`);
+    toast(ok ? 'Mail-Text kopiert' : 'Kopieren hat nicht geklappt', !ok);
+  },
+  'tt-propose-done': () => {
+    ttSaveMoves({});
+    S.tt.note = '';
+    S.tt.proposal = null;
+    closeModal();
+    renderMain();
+    toast('Verschiebungen zurückgesetzt');
   },
   go: (el) => {
     if (el.dataset.tab) S.ui.settingsTab = el.dataset.tab;
@@ -3311,6 +3551,8 @@ document.addEventListener('input', (e) => {
   else if (k === 'file-search') { S.ui.fileSearch = e.target.value; renderMain(); }
   else if (k === 'pick-q') $('#pick-list').innerHTML = pickList(e.target.value);
   else if (k === 'tt-form') S.tt.form[e.target.dataset.key] = e.target.value;
+  else if (k === 'ttp-note') S.tt.note = e.target.value;
+  else if (k === 'ttp-to') S.tt.to = e.target.value;
   else if (k === 'mensa-form') S.mensa.form = e.target.value;
   else if (k === 'mensa-contact') {
     // Live mitschreiben, damit ein Neuaufbau (z. B. Klick auf +) nichts Getipptes verliert

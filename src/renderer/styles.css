@@ -1006,6 +1006,29 @@ mark { background: var(--highlight); color: inherit; border-radius: 3px; padding
 .ttp-title { margin-top: 9px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ttp-sub { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* Stundenplan: Stunden verschieben (Vorschlag) */
+.tt-ev.moved { background: color-mix(in srgb, var(--c) 26%, var(--surface)); box-shadow: inset 0 0 0 1.5px var(--c); z-index: 1; }
+.tt-ev.ghost { background: transparent; border: 1.5px dashed color-mix(in srgb, var(--c) 55%, var(--border)); pointer-events: none; }
+.tt-ev.ghost b, .tt-ev.ghost .tt-meta { color: var(--muted); text-decoration: line-through; }
+.tt-ev.drag-src { opacity: .3; }
+.tt-float { position: fixed; z-index: 95; pointer-events: none; margin: 0; box-shadow: var(--shadow-lg); background: color-mix(in srgb, var(--c) 30%, var(--surface)); transition: top .05s linear, left .05s linear; }
+.tt-float.invalid { opacity: .45; }
+.tt-grid.dragging .tt-col.drop { background: color-mix(in srgb, var(--primary) 7%, transparent); }
+body.tt-grabbing, body.tt-grabbing * { cursor: grabbing !important; user-select: none; }
+.tt-proposal { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; padding: 12px 16px; margin-bottom: 18px; border-color: color-mix(in srgb, var(--primary) 40%, var(--hairline)); }
+.tt-proposal > .ic { color: var(--primary-text); }
+.tt-proposal .grow { flex: 1 1 220px; min-width: 0; }
+.tt-proposal small { display: block; font-size: 12.5px; color: var(--muted); }
+.modal.wide { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: auto; }
+/* Buttons bleiben sichtbar, auch wenn der Dialog scrollt */
+.modal.wide .ttp-dialog > .row { position: sticky; bottom: -24px; margin: 18px -24px -24px; padding: 14px 24px; background: var(--surface); border-top: 1px solid var(--border); }
+/* Vorschau der Mail: so hell wie im Mailprogramm, auch im Dark Mode */
+.ttp-preview { background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 2px 14px 12px; margin: 2px 0 14px; overflow-x: auto; }
+.ttp-list { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 6px; }
+.ttp-list li { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 12px; border-radius: var(--radius-sm); background: var(--fill); }
+.ttp-list .grow { flex: 1; min-width: 0; }
+.ttp-list small { display: block; font-size: 12.5px; color: var(--text-2); }
+
 /* ---------- Mensa ---------- */
 .mensa-day-title { display: flex; align-items: baseline; gap: 10px; margin: 0 2px 14px; }
 .mensa-day-title b { font-family: var(--font-display); font-size: 20px; }

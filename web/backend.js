@@ -503,6 +503,13 @@ for (const [name, fn] of Object.entries(handlers)) {
   };
 }
 Object.assign(api, {
+  // Synchron, damit der Browser das Mailprogramm noch als Folge des Klicks öffnet
+  openMail(url) {
+    if (typeof url !== 'string' || !/^mailto:/i.test(url)) return;
+    const a = document.createElement('a');
+    a.href = url;
+    a.click();
+  },
   onTimetables: on('tt:changed'),
   onMensa: on('mensa:changed'),
   onMensaPrepare: on('mensa:prepare'),

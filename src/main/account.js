@@ -14,7 +14,7 @@ const SUPABASE_KEY = 'sb_publishable_QsTZb0ccYAGJJkdWNvcckg_LzFYyibN';
 // Nur geräteübergreifend sinnvolle Einstellungen (nicht: Download-Ordner, Autostart, Sync-Intervall …)
 const SYNCED = [
   'theme', 'aiProvider', 'claudeModel', 'chatgptModel', 'aiEffort', 'aiGrades', 'aiKeySync',
-  'timetables', 'timetableActive',
+  'timetables', 'timetableActive', 'ttProposalTo',
   'mensaUrl', 'mensaMinBreak', 'mensaMinEat', 'mensaPickupFrom', 'mensaPickupTo', 'mensaFirstName', 'mensaLastName', 'mensaEmail',
 ];
 const META_FILE = 'account-sync.json';

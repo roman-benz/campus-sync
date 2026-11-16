@@ -14,6 +14,7 @@
 - **Hintergrundbetrieb:** Startet mit Windows unsichtbar im Infobereich. Synchronisiert im eingestellten Intervall, nach dem Standby und beim Öffnen. Meldet neue Dateien und bald fällige Abgaben als Windows-Benachrichtigung.
 - **Dokumente in der App:** Eingebauter PDF-Viewer (pdf.js) mit Zoom, Seitensprung, markierbarem Text und Suche im Dokument. Word, PowerPoint und Excel erscheinen als Textansicht.
 - **Stundenplan:** Eigener Reiter mit Wochenansicht aus Rapla oder jedem iCal-Kalender (`https://…`, `webcal://…`). Der Rapla-Plan TSA25 der DHBW Ravensburg ist als Vorlage eingetragen; eigene Links lassen sich hinzufügen. Der Plan wird lokal gespeichert und ist offline verfügbar.
+  - **Verschiebevorschläge:** Stunden mit der Maus an eine andere Stelle ziehen (auf 15 Minuten gerastert, auch an andere Tage). Der Plan selbst bleibt unverändert; verschobene Stunden erscheinen als Vorschlag, die alte Zeit bleibt gestrichelt sichtbar. „Als Vorschlag senden“ öffnet dein Mailprogramm mit einer fertigen Mail an den Kurssprecher: Empfänger, Betreff, alte und neue Zeiten und deine Bemerkung sind schon drin, du musst nur noch abschicken. Eine Übersicht als Grafik (vorher/nachher im Wochenraster) liegt zusätzlich in der Zwischenablage und lässt sich mit Strg+V in die Mail einfügen.
 - **Mensa:** Speiseplan der Mensa Fallenbrunnen (oder jeder anderen Mensa auf my-mensa.de) mit Fotos, Beschreibung, Preisen (DHBW/intern/extern), vegan/vegetarisch-Kennzeichnung und Allergenen. Der letzte Stand bleibt offline sichtbar. Bestellen direkt in der App: Gerichte in den Warenkorb, Abholzeit wählen (passende Pausen aus dem Stundenplan sind markiert), der Abholschein kommt per E-Mail.
 - **Volltextsuche:** Alle Dokumente werden seitengenau indexiert. Die Suche in der Kopfzeile (Strg+Umschalt+F) findet Stellen in allen Skripten und springt direkt zur Seite.
 - **KI-Lernassistent** (Strg+K): Durchsucht die Unterlagen, liest die passenden Seiten und erklärt sie. Fundstellen erscheinen als Links, die im Viewer an der richtigen Seite öffnen. Markierten Text im Viewer kannst du direkt „erklären“ lassen. Er kennt auch Stundenplan und Speiseplan („Wann passt morgen die Mensa?“) und legt dir Essen in den Warenkorb oder bestellt es für dich – verbindlich erst, wenn du im Bestätigungsdialog der App auf „Bestellen“ klickst.
@@ -50,7 +51,8 @@ Unter **[chadoodle.romanbenz.com](https://chadoodle.romanbenz.com)** läuft dies
 - **Chadoodle-Konto (Supabase, Frankfurt):** Beim Anmelden prüft der Server dein Moodle-Token einmal bei deiner Moodle-Seite (nur die User-ID) und verwirft es danach. Gespeichert werden Moodle-Adresse und User-ID, abgeglichene Einstellungen, über Chadoodle aufgegebene Mensa-Bestellungen und – nur wenn eingeschaltet – der Claude-API-Key. Nicht gespeichert werden Kursdateien, Kursinhalte, Noten, das Moodle-Token und dein Name. Unter **Einstellungen → Konto** kannst du ein Gerät trennen oder das Konto samt aller Daten löschen.
 
 - Gespeichert wird nur ein Zugriffstoken, kein Kennwort, verschlüsselt mit Windows DPAPI. Das gilt ebenso für API-Key und ChatGPT-Tokens.
-- Kursdaten bleiben lokal. Nur Inhalte, die der KI-Assistent für eine Antwort liest, gehen an den gewählten KI-Anbieter. Namen von Forenautoren werden nie übertragen, Noten nur, wenn du das unter **Einstellungen → KI-Assistent** erlaubst. Aus dem Stundenplan gehen nur Zeit, Titel und Raum mit, keine Beschreibungen. Name und E-Mail für Mensa-Bestellungen kennt die KI nur, wenn du sie ihr im Chat nennst; der Name kommt beim Bestellen direkt aus deinem Moodle-Konto.
+- Kursdaten bleiben lokal. Nur Inhalte, die der KI-Assistent für eine Antwort liest, gehen an den gewählten KI-Anbieter. Namen von Forenautoren werden nie übertragen, Noten nur, wenn du das unter **Einstellungen → KI-Assistent** erlaubst. Aus dem Stundenplan gehen nur Zeit, Titel und Raum mit, keine Beschreibungen.
+- Verschiebevorschläge bleiben auf dem Gerät. Die Mail verschickst du selbst aus deinem Mailprogramm; Chadoodle sendet nichts. Nur die Adresse des Kurssprechers wird wie die anderen Einstellungen mit dem Chadoodle-Konto abgeglichen. Name und E-Mail für Mensa-Bestellungen kennt die KI nur, wenn du sie ihr im Chat nennst; der Name kommt beim Bestellen direkt aus deinem Moodle-Konto.
 - Kursunterlagen sind urheberrechtlich geschützt, und viele Hochschulen untersagen in ihren Moodle-Nutzungsbedingungen die Weitergabe von Inhalten an Dritte. Kläre vor Nutzung des KI-Assistenten, ob deine Hochschule das erlaubt.
 - Das Zugriffstoken wird nur an die eigene Moodle-Seite gesendet. Inhalte, die auf fremde Server verweisen, werden ohne Token geladen oder blockiert.
 
@@ -60,6 +62,7 @@ Unter **[chadoodle.romanbenz.com](https://chadoodle.romanbenz.com)** läuft dies
 npm install
 npm start          # App starten
 npm run demo       # Demo mit Beispielkursen (ohne Moodle-Zugang)
+npm test           # Tests (Verschiebevorschläge im Stundenplan)
 npm run dist       # Installer lokal nach out/ bauen
 npm run web:dev    # Web-Version bauen und unter http://localhost:8788 starten
 ```
@@ -90,6 +93,7 @@ Die Web-Version wird bei jedem Push auf `main` automatisch von Cloudflare Pages 
 | `src/main/chatgpt-auth.js`, `chatgpt.js` | Sign in with ChatGPT (OAuth + PKCE) und Chat über die Responses API |
 | `src/main/updater.js` | Automatische Updates (electron-updater, GitHub-Releases) |
 | `src/renderer/*` | Oberfläche (Vanilla JS ohne Build-Schritt) und PDF-Viewer (`viewer.js`) |
+| `src/renderer/tt-proposal.js`, `test/` | Verschiebevorschläge im Stundenplan: Rastern beim Ziehen, Mailtext, mailto-Link, Übersicht als HTML-Tabelle; Tests mit `node --test` |
 | `build/installer.nsh` | Autostart-Eintrag bei Installation und Deinstallation |
 | `web/backend.js` | Web-Version: ersetzt `main.js` und `preload.js` im Browser |
 | `web/shims/*` | Browser-Ersatz für `fs` (IndexedDB), `electron`, `crypto` und `url` |

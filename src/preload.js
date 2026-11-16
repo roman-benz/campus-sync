@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('api', {
   fileUrl: (id) => ipcRenderer.invoke('file:url', id),
   openFolder: (courseId) => ipcRenderer.invoke('folder:open', courseId),
   openExternal: (url) => ipcRenderer.invoke('open:external', url),
+  openMail: (url) => ipcRenderer.invoke('open:mail', url),
   clearNews: () => ipcRenderer.invoke('news:clear'),
   aiSend: (payload) => ipcRenderer.invoke('ai:send', payload),
   aiStop: (provider, id) => ipcRenderer.invoke('ai:stop', { provider, id }),

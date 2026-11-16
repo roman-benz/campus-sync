@@ -1,5 +1,6 @@
 // Demo-Modus mit Beispieldaten (ohne Moodle-Zugang): npm run demo
-// Optional: --shots <ordner> erstellt Screenshots aller Ansichten und beendet die App.
+// Optional: --shots <ordner> erstellt Screenshots aller Ansichten und beendet die App,
+// mit --tt zusätzlich nur den Stundenplan (Verschieben per Maus und Vorschlag per Mail).
 const { app, BrowserWindow } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -42,6 +43,33 @@ const SKRIPT = [
   'Uebungsaufgaben Kapitel 2\n\n1. Berechnen Sie die Resonanzfrequenz fuer L = 10 mH und C = 100 nF.\n2. Bestimmen Sie Guete und Bandbreite fuer R = 10 Ohm.\n3. Zeichnen Sie das Zeigerdiagramm bei f = 2 f0.',
 ];
 
+// Demo-Stundenplan: diese und nächste Woche, Mo–Fr
+const DEMO_ICS = 'https://rapla.demo.invalid/tsa25.ics';
+function demoIcs() {
+  const mon = new Date();
+  mon.setHours(0, 0, 0, 0);
+  mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
+  const plan = [
+    [0, '09:00', '11:30', 'Mathematik II', 'D201', 'Müller, Hans'],
+    [0, '12:30', '15:00', 'Elektrotechnik II', 'C107', 'Schmidt, Anna'],
+    [1, '08:30', '10:45', 'Informatik II', 'B204', 'Weber, Tom'],
+    [1, '11:00', '12:30', 'Physik', 'A101', 'Klein, Eva'],
+    [2, '09:00', '12:15', 'Messtechnik Labor', 'Labor 3', 'Wolf, Jan'],
+    [3, '13:00', '15:30', 'Mathematik II', 'D201', 'Müller, Hans'],
+    [4, '09:00', '11:00', 'Projektmanagement', 'E001', 'Braun, Lea'],
+  ];
+  const utc = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Chadoodle Demo//DE'];
+  for (let w = 0; w < 2; w++) {
+    plan.forEach(([d, from, to, title, room, who], i) => {
+      const at = (t) => { const x = new Date(mon); x.setDate(x.getDate() + w * 7 + d); x.setHours(...t.split(':').map(Number)); return x; };
+      lines.push('BEGIN:VEVENT', `UID:demo-${w}-${i}`, `DTSTART:${utc(at(from))}`, `DTEND:${utc(at(to))}`, `SUMMARY:${title}`, `LOCATION:${room}`,
+        `DESCRIPTION:Personen: ${who.replace(',', '\\,')} Ressourcen: ${room}`, 'END:VEVENT');
+    });
+  }
+  return lines.concat('END:VCALENDAR').join('\r\n');
+}
+
 function seed() {
   const store = require('../src/main/store');
   const { safeName } = require('../src/main/sync');
@@ -52,10 +80,14 @@ function seed() {
   // Passkey-Zugang vortäuschen; die Prüfung beim Server beantwortet der fetch-Stub unten
   const demoUser = { name: 'Demo', isAdmin: false };
   store.setSecret('webSession', JSON.stringify({ token: 'demo', user: demoUser }));
+  // Fester Stundenplan statt Rapla, damit die Demo offline gleich aussieht; Verschiebungen zurücksetzen
+  store.setSettings({ timetables: [{ id: 'demo', name: 'TSA25 · Demo', url: DEMO_ICS }], timetableActive: 'demo', ttMoves: {}, ttProposalTo: '' });
   const realFetch = globalThis.fetch;
-  globalThis.fetch = (url, opts) => (String(url).endsWith('/api/auth/me')
-    ? Promise.resolve(new Response(JSON.stringify({ user: demoUser }), { headers: { 'Content-Type': 'application/json' } }))
-    : realFetch(url, opts));
+  globalThis.fetch = (url, opts) => {
+    if (String(url).endsWith('/api/auth/me')) return Promise.resolve(new Response(JSON.stringify({ user: demoUser }), { headers: { 'Content-Type': 'application/json' } }));
+    if (String(url) === DEMO_ICS) return Promise.resolve(new Response(demoIcs(), { headers: { 'Content-Type': 'text/calendar' } }));
+    return realFetch(url, opts);
+  };
 
   const now = Math.floor(Date.now() / 1000);
   const day = 86400;
@@ -168,9 +200,76 @@ async function shots() {
     const img = await win.webContents.capturePage();
     fs.writeFileSync(path.join(shotsDir, name + '.png'), img.toPNG());
   };
+  // Stundenplan: Physik (Di) mit echten Mausereignissen auf Do 9:00 ziehen, Klick öffnet weiter die
+  // Details, dann der Vorschlagsdialog bis zur fertigen Mail (statt des Mailprogramms wird der Link geloggt)
+  const ttShots = async () => {
+    const { ipcMain, clipboard } = require('electron');
+    await run(`document.querySelector('[data-route=timetable]').click()`);
+    await wait(1500);
+    await snap('15-stundenplan');
+    const pos = await run(`(() => {
+      const b = [...document.querySelectorAll('button.tt-ev')].find((x) => x.textContent.includes('Physik')).getBoundingClientRect();
+      const c = document.querySelectorAll('.tt-col[data-day]')[3].querySelector('.tt-body').getBoundingClientRect();
+      const from = Number(document.querySelector('.tt-grid').dataset.from);
+      return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + 12), tx: Math.round(c.left + c.width / 2), ty: Math.round(c.top + (9 - from) * 54 + 12) };
+    })()`);
+    const mouse = (type, x, y) => win.webContents.sendInputEvent({ type, x, y, button: 'left', clickCount: 1, modifiers: type === 'mouseMove' ? ['leftButtonDown'] : [] });
+    mouse('mouseDown', pos.x, pos.y);
+    for (let i = 1; i <= 15; i++) {
+      mouse('mouseMove', Math.round(pos.x + ((pos.tx - pos.x) * i) / 15), Math.round(pos.y + ((pos.ty - pos.y) * i) / 15));
+      await wait(25);
+    }
+    await snap('15b-ziehen');
+    mouse('mouseUp', pos.tx, pos.ty);
+    await wait(600);
+    console.log('TT-VERSCHOBEN', await run(`JSON.stringify(Object.values(ttMoves()).map((m) => [m.title, TTP.span(m.start, m.end), TTP.span(m.newStart, m.newEnd)]))`));
+    console.log('TT-DETAILS-NACH-ZIEHEN', await run(`!!document.querySelector('#modal')`));
+    await snap('16-verschoben');
+    // Einfacher Klick (ohne Ziehen) auf eine andere Stunde: Details gehen auf, nichts wird verschoben
+    const other = await run(`(() => { const r = [...document.querySelectorAll('button.tt-ev')].find((x) => x.textContent.includes('Projektmanagement')).getBoundingClientRect(); return { x: Math.round(r.left + 20), y: Math.round(r.top + 12) }; })()`);
+    mouse('mouseDown', other.x, other.y);
+    mouse('mouseUp', other.x, other.y);
+    await wait(400);
+    console.log('TT-KLICK-DETAILS', await run(`document.querySelector('#modal h3') && document.querySelector('#modal h3').textContent`), 'Verschiebungen:', await run('Object.keys(ttMoves()).length'));
+    await run('closeModal()');
+    await run(`document.querySelector('[data-action=tt-propose]').click()`);
+    await wait(900);
+    await run(`(() => {
+      const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+      set('ttp-to', 'kurssprecher@example.org');
+      set('ttp-note', 'Frau Klein ist am Dienstag auf einer Tagung, Donnerstagmorgen ist der Raum frei.');
+    })()`);
+    await snap('17-vorschlag-dialog');
+    await run(`document.documentElement.dataset.theme = 'dark'`);
+    await snap('17b-vorschlag-dunkel');
+    await run(`document.documentElement.dataset.theme = 'light'`);
+    // „Mail öffnen“: Link mitschreiben statt das echte Mailprogramm zu starten; Zwischenablage danach wiederherstellen
+    const savedText = await clipboard.readText();
+    let mailUrl = null;
+    ipcMain.removeHandler('open:mail');
+    ipcMain.handle('open:mail', (_e, url) => { mailUrl = url; });
+    win.focus();
+    await win.webContents.executeJavaScript(`document.querySelector('[data-action=tt-propose-open]').click()`, true);
+    await wait(1500);
+    console.log('TT-MAILTO', mailUrl ? decodeURIComponent(mailUrl) : '(nicht geöffnet)');
+    const html = await win.webContents.executeJavaScript(`navigator.clipboard.read().then(async (items) => {
+      const it = items.find((i) => i.types.includes('text/html'));
+      return it ? (await it.getType('text/html')).text() : '';
+    }).catch((e) => 'Fehler: ' + e.message)`, true);
+    console.log('TT-ZWISCHENABLAGE', html.includes('NEU') ? `HTML mit Übersicht (${html.length} Zeichen)` : `(keine Übersicht) ${html.slice(0, 80)}`);
+    fs.writeFileSync(path.join(shotsDir, '18-mail-uebersicht.html'), `<!doctype html><meta charset="utf-8"><body style="margin:24px">${html}</body>`);
+    await snap('18-mail-fertig');
+    await clipboard.writeText(savedText);
+    await run('closeModal()');
+  };
+
   win.setSize(1440, 900);
   win.show();
   await wait(1500);
+  if (process.argv.includes('--tt')) {
+    await ttShots();
+    return app.exit(0);
+  }
   await snap('01-dashboard');
   await run(`document.querySelector('[data-route=courses]').click()`);
   await snap('02-kurse');
@@ -248,6 +347,7 @@ async function shots() {
   await snap('13-chatgpt-panel');
   await run(`document.querySelector('[data-action=avatar], .avatar').click(); document.querySelector('[data-route=settings]').click(); document.querySelector('[data-action=settings-tab][data-v=ai]').click()`);
   await snap('14-ki-einstellungen');
+  await ttShots();
   if (process.argv.includes('--chat')) {
     await run(`document.querySelector('[data-route=courses]').click(); document.querySelector('[data-action=course][data-id="11"]').click(); document.querySelector('[data-action=ask]').click()`);
     for (let i = 0; i < 90; i++) {
