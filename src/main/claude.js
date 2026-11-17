@@ -1,7 +1,7 @@
 // Claude-Lernassistent (Anthropic API-Key): Streaming + Werkzeug-Schleife über die lokalen Moodle-Daten.
 const { Anthropic } = require('@anthropic-ai/sdk');
 const store = require('./store');
-const { toolSpecs, validateInput, instructions } = require('./ai-tools');
+const { toolSpecs, validateInput, instructions, imageBlocks } = require('./ai-tools');
 
 const FALLBACK_MODELS = new Set(['claude-opus-5', 'claude-fable-5-1']);
 const NO_ADAPTIVE_THINKING = new Set(['claude-haiku-4-5']);
@@ -37,7 +37,7 @@ class ClaudeAssistant {
     }
   }
 
-  async send({ conversationId, text, attachments = [], context = {} }, emit) {
+  async send({ conversationId, text, attachments = [], images = [], context = {} }, emit) {
     let conv = this.conversations.get(conversationId);
     if (!conv) {
       conv = { messages: [], stream: null, stopped: false, busy: false };
@@ -49,6 +49,7 @@ class ClaudeAssistant {
 
     try {
       const content = await this.tools.attachmentBlocks(attachments, 'claude');
+      content.push(...imageBlocks(images));
       const ctx = this.tools.describeContext(context);
       content.push({ type: 'text', text: ctx ? `${ctx}\n\n${text}` : text });
       conv.messages.push({ role: 'user', content });

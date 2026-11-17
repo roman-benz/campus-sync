@@ -11,6 +11,10 @@ const { stripHtml } = require('./extract');
 const gradesAllowed = () => !!store.getSettings().aiGrades;
 
 const IMAGE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
+const IMAGE_MEDIA = new Set(Object.values(IMAGE_TYPES));
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_B64 = Math.ceil(MAX_IMAGE_BYTES / 3) * 4;
+const MAX_CHAT_IMAGES = 8;
 const MAX_PAGES_PER_READ = 25;
 
 const fmtDate = (ts) =>
@@ -228,6 +232,7 @@ function instructions(cache) {
     '- Probiere bei wenigen Treffern Synonyme, Fachbegriffe, Abkürzungen oder englische Begriffe.',
     '- Belege Aussagen mit Fundstellen und verlinke sie IMMER als Markdown-Link im Format [Dateiname, S. 12](doc://FILE_ID?page=12). Die App öffnet diese Links direkt an der Seite im PDF-Viewer.',
     '- Erkläre didaktisch: erst die Kernidee, dann Details, Formeln mit LaTeX ($…$ bzw. $$…$$), bei Bedarf ein kurzes Beispiel.',
+    '- Bilder und Screenshots (z. B. Ausschnitte aus PDF-Seiten, Tafelbilder, Aufgaben) siehst du direkt: lies Formeln, Diagramme und Handschrift daraus ab, erkläre sie und such bei Bedarf die passende Stelle in den Unterlagen.',
     '- Wenn die Unterlagen etwas nicht abdecken, sag das und ergänze dann mit allgemeinem Fachwissen (klar gekennzeichnet).',
     gradesAllowed()
       ? '- Für Termine, Abgaben und Noten nutze get_deadlines, read_activity und get_grades.'
@@ -607,6 +612,15 @@ class AiTools {
       const f = this.cache.files[id];
       if (!f) continue;
       try {
+        // Bilddateien sehen beide Anbieter als Bild (ChatGPT wandelt den Block in input_image um)
+        const ext = path.extname(f.filename).toLowerCase();
+        if (IMAGE_TYPES[ext] && provider === 'openai') {
+          await this.sync.ensureFile(f.id);
+          if (fs.statSync(f.localPath).size > MAX_IMAGE_BYTES) throw new Error('Bild ist zu groß (max. 5 MB).');
+          blocks.push({ type: 'text', text: `Angehängte Datei: ${f.filename} (file_id: ${f.id})` });
+          blocks.push({ type: 'image', source: { type: 'base64', media_type: IMAGE_TYPES[ext], data: fs.readFileSync(f.localPath).toString('base64') } });
+          continue;
+        }
         const out = await this.run('read_file', { file_id: id }, provider);
         blocks.push({ type: 'text', text: `Angehängte Datei: ${f.filename} (file_id: ${f.id})` });
         if (typeof out === 'string') blocks.push({ type: 'text', text: out });
@@ -619,4 +633,18 @@ class AiTools {
   }
 }
 
-module.exports = { AiTools, TOOL_SPECS, toolSpecs, validateInput, instructions };
+// Eingefügte Bilder und Screenshots aus dem Chat (kommen als Base64 aus der Oberfläche).
+// Ergebnis: Bild-Blöcke im Claude-Format; ChatGPT wandelt sie in input_image um.
+function imageBlocks(images) {
+  const out = [];
+  if (!Array.isArray(images)) return out;
+  for (const img of images.slice(0, MAX_CHAT_IMAGES)) {
+    if (!img || typeof img.data !== 'string' || !IMAGE_MEDIA.has(img.mediaType)) continue;
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(img.data) || img.data.length > MAX_IMAGE_B64) continue;
+    if (img.name) out.push({ type: 'text', text: `Bild: ${String(img.name).slice(0, 120)}` });
+    out.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.data } });
+  }
+  return out;
+}
+
+module.exports = { AiTools, TOOL_SPECS, toolSpecs, validateInput, instructions, imageBlocks };

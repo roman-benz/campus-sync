@@ -49,7 +49,7 @@ const S = {
 Object.defineProperty(S, 'chat', { get: () => S.chats[prov()] });
 
 function newChat() {
-  return { id: 'c' + Math.random().toString(36).slice(2), messages: [], busy: false, attachments: [], ctxOn: true };
+  return { id: 'c' + Math.random().toString(36).slice(2), messages: [], busy: false, attachments: [], images: [], ctxOn: true };
 }
 
 // ---------- Hilfsfunktionen ----------
@@ -2039,6 +2039,7 @@ function tabsHtml(p, i) {
     <button class="icon-btn sm vt-add" data-action="tab-add" data-pane="${i}" title="Weiteres Dokument öffnen">${icon('plus', 'sm')}</button>
     <div class="spacer"></div>
     ${cur ? `<div class="vt-tools">
+      ${isPdf(S.data.files[cur.fileId] || {}) ? `<button class="icon-btn sm" data-action="snip-start" data-doc="${cur.key}" title="Ausschnitt an die KI schicken (Strg+Umschalt+S)">${icon('crop', 'sm')}</button>` : ''}
       <button class="icon-btn sm" data-action="viewer-find" data-doc="${cur.key}" title="Im Dokument suchen (Strg+F)">${icon('search', 'sm')}</button>
       <button class="icon-btn sm" data-action="viewer-more" data-doc="${cur.key}" title="Weitere Aktionen">${icon('more', 'sm')}</button>
     </div>` : ''}
@@ -2156,6 +2157,8 @@ function docMenuHtml(d) {
   return [
     item('viewer-ask', 'sparkles', 'Diese Seite erklären', 'data-mode="page"'),
     item('viewer-ask', 'list', 'Dokument zusammenfassen', 'data-mode="summary"'),
+    f && isPdf(f) ? item('snip-start', 'crop', 'Ausschnitt an die KI…') : '',
+    f && isPdf(f) ? item('snip-page', 'image', 'Seite als Bild anhängen') : '',
     f && isPdf(f) ? item('viewer-zoom', 'fit', 'An Breite anpassen', 'data-z="fit"') : '',
     '<div class="vmenu-sep"></div>',
     item('tab-move', 'columns', split ? 'In die andere Hälfte verschieben' : D.panes[pi] && D.panes[pi].docs.length > 1 ? 'Daneben anzeigen' : 'Anderes Dokument daneben öffnen…'),
@@ -2805,7 +2808,8 @@ function renderChatBody() {
 
 function messageInner(m) {
   if (m.role === 'user') {
-    return `${m.attachments.length ? `<div class="att">${m.attachments.map((a) => `<span class="att-chip">${icon('file', 'sm')}<span>${esc(a)}</span></span>`).join('')}</div>` : ''}${m.quote ? `<div class="quote">${esc(m.quote.slice(0, 400))}${m.quote.length > 400 ? '…' : ''}</div>` : ''}<div class="bubble">${esc(m.text)}</div>`;
+    const imgs = m.images || [];
+    return `${m.attachments.length ? `<div class="att">${m.attachments.map((a) => `<span class="att-chip">${icon('file', 'sm')}<span>${esc(a)}</span></span>`).join('')}</div>` : ''}${imgs.length ? `<div class="att imgs">${imgs.map((im, j) => `<img class="msg-img" src="${im.url}" alt="${esc(im.name)}" title="${esc(im.name)}" data-action="img-view" data-msg-img="${j}" />`).join('')}</div>` : ''}${m.quote ? `<div class="quote">${esc(m.quote.slice(0, 400))}${m.quote.length > 400 ? '…' : ''}</div>` : ''}<div class="bubble">${esc(m.text)}</div>`;
   }
   let html = '';
   for (const p of m.parts) {
@@ -2841,8 +2845,9 @@ function renderCompose() {
     ${S.chat.attachments.length && !S.chat.busy ? `<div class="suggestions" style="flex-direction:row;flex-wrap:wrap;gap:6px;margin-bottom:8px">${['Fasse zusammen', 'Erkläre die schwierigsten Stellen', 'Erstelle Lernkarten', 'Erstelle Übungsfragen mit Lösungen'].map((q) => `<div class="suggestion" style="padding:6px 10px;font-size:12.5px" data-action="ask" data-q="${esc(q)}">${esc(q)}</div>`).join('')}</div>` : ''}
     <form class="compose-box" data-submit="claude-send">
       <div class="compose-chips" id="compose-chips">${composeChips()}</div>
-      <textarea id="chat-input" rows="1" placeholder="Frag nach Inhalten deiner Unterlagen…" data-input="chat-input">${esc(draft)}</textarea>
-      <div class="compose-actions"><small>${gpt ? `Nutzt deinen ChatGPT-Plan · <a href="#" data-action="external" data-url="${MANAGE_USAGE_URL}">Nutzung verwalten</a>` : 'Enter senden · Shift+Enter neue Zeile'}</small>
+      ${S.chat.images.length ? `<div class="compose-imgs">${S.chat.images.map((img) => `<span class="att-img" title="${esc(img.name)}"><img src="${img.url}" alt="${esc(img.name)}" data-action="img-view" data-img="${img.id}" /><button type="button" data-action="img-remove" data-img="${img.id}" title="Entfernen">${icon('x', 'sm')}</button></span>`).join('')}</div>` : ''}
+      <textarea id="chat-input" rows="1" placeholder="${S.chat.images.length ? 'Was möchtest du zum Bild wissen?' : 'Frag nach Inhalten deiner Unterlagen…'}" data-input="chat-input">${esc(draft)}</textarea>
+      <div class="compose-actions"><button type="button" class="icon-btn sm compose-attach" data-action="img-add" title="Bild anhängen (oder mit Strg+V einfügen)">${icon('paperclip', 'sm')}</button><small>${gpt ? `Nutzt deinen ChatGPT-Plan · <a href="#" data-action="external" data-url="${MANAGE_USAGE_URL}">Nutzung verwalten</a>` : 'Enter senden · Shift+Enter neue Zeile'}</small>
         ${S.chat.busy ? `<button type="button" class="send-btn" data-action="chat-stop" title="Stoppen">${icon('stop', 'sm')}</button>` : `<button class="send-btn" title="Senden">${icon('send', 'sm')}</button>`}
       </div>
     </form>`;
@@ -2902,14 +2907,17 @@ function sendChat(textArg, extra = {}) {
   if (S.chat.busy) return;
   if (!providerReady()) { openClaude(); return; }
   const input = $('#chat-input');
-  const text = (textArg ?? (input ? input.value : '')).trim();
-  if (!text) return;
   const chat = S.chat;
+  const images = [...chat.images, ...(extra.images || [])].slice(0, MAX_CHAT_IMAGES);
+  let text = (textArg ?? (input ? input.value : '')).trim();
+  if (!text && images.length) text = images.length > 1 ? 'Erkläre mir, was auf den Bildern zu sehen ist.' : 'Erkläre mir, was auf dem Bild zu sehen ist.';
+  if (!text) return;
   const provider = prov();
   const attachments = [...chat.attachments];
-  chat.messages.push({ role: 'user', text, quote: extra.selection || null, attachments: attachments.map((id) => (S.data.files[id] || {}).filename || id) });
+  chat.messages.push({ role: 'user', text, quote: extra.selection || null, attachments: attachments.map((id) => (S.data.files[id] || {}).filename || id), images: images.map((im) => ({ url: im.url, name: im.name })) });
   chat.messages.push({ role: 'assistant', parts: [], streaming: true, startedAt: Date.now() });
   chat.attachments = [];
+  chat.images = [];
   chat.busy = true;
   chat.draft = '';
   if (input) input.value = '';
@@ -2921,7 +2929,8 @@ function sendChat(textArg, extra = {}) {
   chat.moduleId = null;
   renderChatBody();
   renderCompose();
-  api.aiSend({ provider, conversationId: chat.id, text, attachments, context });
+  const imagePayload = images.map((im) => ({ name: im.name, mediaType: im.mediaType, data: im.url.slice(im.url.indexOf(',') + 1) }));
+  api.aiSend({ provider, conversationId: chat.id, text, attachments, images: imagePayload, context });
 }
 
 let rafPending = false;
@@ -3024,6 +3033,157 @@ function attachFile(id) {
   openClaude();
   renderCompose();
   setTimeout(() => $('#chat-input') && $('#chat-input').focus(), 50);
+}
+
+// ---------- Bilder im Chat: einfügen, ablegen, auswählen, Screenshots aus PDFs ----------
+const MAX_CHAT_IMAGES = 8;
+const IMAGE_MIME = /^image\/(png|jpe?g|gif|webp|bmp)$/i;
+
+// Canvas → Bild für die KI: PNG (scharf für Text), bei zu großen Dateien JPEG
+function canvasImage(canvas, name) {
+  let url = canvas.toDataURL('image/png');
+  let mediaType = 'image/png';
+  for (const q of [0.92, 0.85, 0.75]) {
+    if (url.length <= 4.5e6) break;
+    url = canvas.toDataURL('image/jpeg', q);
+    mediaType = 'image/jpeg';
+  }
+  if (url.length > 6.5e6) throw new Error('Bild ist zu groß.');
+  return { id: 'i' + Math.random().toString(36).slice(2), name, mediaType, url, w: canvas.width, h: canvas.height };
+}
+
+// Datei/Blob (eingefügt, abgelegt, ausgewählt) → verkleinert auf höchstens 2000 px lange Kante
+async function blobImage(blob, name) {
+  const bmp = await createImageBitmap(blob);
+  const k = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(bmp.width * k));
+  c.height = Math.max(1, Math.round(bmp.height * k));
+  const ctx = c.getContext('2d');
+  // Transparente Bereiche (z. B. Screenshots mit Alpha) auf Weiß, damit Text lesbar bleibt
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close && bmp.close();
+  return canvasImage(c, name || 'Bild');
+}
+
+function addChatImages(imgs, { focus = true } = {}) {
+  const room = MAX_CHAT_IMAGES - S.chat.images.length;
+  if (room <= 0) { toast(`Höchstens ${MAX_CHAT_IMAGES} Bilder pro Nachricht.`, true); return; }
+  if (imgs.length > room) toast(`Höchstens ${MAX_CHAT_IMAGES} Bilder pro Nachricht – ${imgs.length - room} weggelassen.`, true);
+  S.chat.images.push(...imgs.slice(0, room));
+  openClaude();
+  renderCompose();
+  if (focus) setTimeout(() => $('#chat-input') && $('#chat-input').focus(), 50);
+}
+
+async function addImageFiles(files) {
+  const list = [...files].filter((f) => IMAGE_MIME.test(f.type));
+  if (!list.length) return false;
+  const imgs = [];
+  for (const f of list) {
+    try { imgs.push(await blobImage(f, f.name && !/^image\.\w+$/i.test(f.name) ? f.name : 'Eingefügtes Bild')); } catch (e) { toast(`${f.name || 'Bild'}: ${cleanErr(e)}`, true); }
+  }
+  if (imgs.length) addChatImages(imgs);
+  return true;
+}
+
+function pickImages() {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/png,image/jpeg,image/gif,image/webp,image/bmp';
+  inp.multiple = true;
+  inp.onchange = () => addImageFiles(inp.files);
+  inp.click();
+}
+
+function showImage(url, name) {
+  showModal(`<div class="img-view"><img src="${esc(url)}" alt="${esc(name || 'Bild')}" /></div>
+    <div class="row"><button class="btn" data-action="modal-close">Schließen</button></div>`);
+  const m = $('#modal .modal');
+  if (m) m.classList.add('wide');
+}
+
+const snipName = (d, pages) => {
+  const f = S.data.files[d.fileId];
+  const p = pages.length > 1 ? `S. ${pages[0]}–${pages[pages.length - 1]}` : `S. ${pages[0]}`;
+  return `${f ? docTitle(f) : 'Dokument'}, ${p}`;
+};
+
+async function snipPage(d, n) {
+  if (!d || !d.ctl || !d.ctl.capturePage) return;
+  try {
+    const r = await d.ctl.capturePage(n || d.page);
+    if (!r) return;
+    addChatImages([canvasImage(r.canvas, snipName(d, r.pages))]);
+    toast(`Seite ${r.pages[0]} angehängt`);
+  } catch (e) {
+    toast('Seite konnte nicht aufgenommen werden: ' + cleanErr(e), true);
+  }
+}
+
+// Ausschnitt aufziehen: Ebene über dem Dokument, Rechteck mit der Maus; ein Klick nimmt die ganze Seite
+function startSnip(d) {
+  if (!d || !d.ctl || !d.ctl.capture) { toast('Ausschnitte gehen bei PDFs, sobald das Dokument geladen ist.', true); return; }
+  if (d.snip) return;
+  const body = d.el && d.el.querySelector('.viewer-body');
+  const scroll = ref(d, 'scroll');
+  if (!body || !scroll) return;
+  const layer = document.createElement('div');
+  layer.className = 'snip-layer';
+  layer.innerHTML = `<div class="snip-hint">${icon('crop', 'sm')}<span>Bereich aufziehen · Klick nimmt die ganze Seite · Esc bricht ab</span></div><div class="snip-box" hidden></div>`;
+  body.appendChild(layer);
+  d.snip = layer;
+  const box = layer.querySelector('.snip-box');
+  let start = null;
+  const rectOf = (e) => ({ left: Math.min(start.x, e.clientX), top: Math.min(start.y, e.clientY), right: Math.max(start.x, e.clientX), bottom: Math.max(start.y, e.clientY) });
+  layer.addEventListener('wheel', (e) => {
+    if (e.ctrlKey) return;
+    const k = e.deltaMode === 1 ? 33 : 1;
+    scroll.scrollBy(e.deltaX * k, e.deltaY * k);
+    if (start) start.y -= e.deltaY * k; // Startpunkt wandert mit dem Inhalt
+  }, { passive: true });
+  layer.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    layer.setPointerCapture(e.pointerId);
+    start = { x: e.clientX, y: e.clientY };
+  });
+  layer.addEventListener('pointermove', (e) => {
+    if (!start) return;
+    const r = rectOf(e);
+    const lr = layer.getBoundingClientRect();
+    box.hidden = false;
+    Object.assign(box.style, { left: `${r.left - lr.left}px`, top: `${r.top - lr.top}px`, width: `${r.right - r.left}px`, height: `${r.bottom - r.top}px` });
+  });
+  layer.addEventListener('pointerup', async (e) => {
+    if (!start) return;
+    const r = rectOf(e);
+    start = null;
+    endSnip(d);
+    try {
+      if (r.right - r.left < 8 && r.bottom - r.top < 8) {
+        const n = d.ctl.pageAt(e.clientX, e.clientY);
+        if (n) await snipPage(d, n);
+        return;
+      }
+      const shot = await d.ctl.capture(r);
+      if (!shot) { toast('Der Bereich liegt nicht auf einer Seite.', true); return; }
+      addChatImages([canvasImage(shot.canvas, snipName(d, shot.pages))]);
+      toast('Ausschnitt angehängt');
+    } catch (err) {
+      toast('Ausschnitt fehlgeschlagen: ' + cleanErr(err), true);
+    }
+  });
+  layer.addEventListener('pointercancel', () => endSnip(d));
+}
+
+function endSnip(d) {
+  if (!d || !d.snip) return false;
+  d.snip.remove();
+  d.snip = null;
+  return true;
 }
 
 const actions = {
@@ -3388,15 +3548,39 @@ const actions = {
     showDocs();
   },
   'pick-doc': (el) => { closeModal(); openDoc(el.dataset.file, 1, '', D.pickPane); },
-  'viewer-ask': (el) => {
+  'viewer-ask': async (el) => {
     openClaude();
     const d = docOf(el);
     focusTab(d);
     const f = S.data.files[V.mountedFor];
-    if (!f || !providerReady()) return;
+    if (!f || !providerReady() || S.chat.busy) return;
     S.chat.ctxOn = true;
-    if (el.dataset.mode === 'summary') sendChat(`Fasse das Dokument „${f.filename}“ strukturiert zusammen: Kernaussagen, wichtige Formeln und Begriffe – mit Seitenangaben.`);
-    else sendChat(`Erkläre mir Seite ${V.page} von „${f.filename}“ verständlich: worum geht es, was sind die Kernideen, und wie hängen Formeln und Abbildungen zusammen?`);
+    if (el.dataset.mode === 'summary') return sendChat(`Fasse das Dokument „${f.filename}“ strukturiert zusammen: Kernaussagen, wichtige Formeln und Begriffe – mit Seitenangaben.`);
+    // Bei PDFs geht die Seite zusätzlich als Bild mit: so sieht die KI auch Formeln, Skizzen und Diagramme
+    const page = V.page;
+    let images = [];
+    if (V.ctl && V.ctl.capturePage) {
+      try {
+        const r = await V.ctl.capturePage(page, 1600);
+        if (r) images = [canvasImage(r.canvas, snipName(V, r.pages))];
+      } catch {}
+    }
+    sendChat(`Erkläre mir Seite ${page} von „${f.filename}“ verständlich: worum geht es, was sind die Kernideen, und wie hängen Formeln und Abbildungen zusammen?`, { images });
+  },
+  'snip-start': (el) => { const d = docOf(el); focusTab(d); startSnip(d); },
+  'snip-page': (el) => { const d = docOf(el); focusTab(d); snipPage(d, d.page); },
+  'img-add': () => pickImages(),
+  'img-remove': (el) => { S.chat.images = S.chat.images.filter((x) => x.id !== el.dataset.img); renderCompose(); },
+  'img-view': (el) => {
+    if (el.dataset.img) {
+      const im = S.chat.images.find((x) => x.id === el.dataset.img);
+      if (im) showImage(im.url, im.name);
+      return;
+    }
+    const msg = el.closest('.msg');
+    const m = msg && S.chat.messages[Number(msg.id.replace('msg-', ''))];
+    const im = m && m.images && m.images[Number(el.dataset.msgImg)];
+    if (im) showImage(im.url, im.name);
   },
   'sel-ask': (el) => {
     const d = docOf(el);
@@ -3650,7 +3834,12 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     actions['toggle-claude']();
   }
+  if (S.route.name === 'viewer' && (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    startSnip(V);
+  }
   if (e.key === 'Escape') {
+    if (endSnip(V)) return;
     if ($('#vmenu')) closeMenu();
     else if ($('#modal')) closeModal();
     else if (S.ui.dropdown) { S.ui.dropdown = null; renderNav(); }
@@ -3659,6 +3848,33 @@ document.addEventListener('keydown', (e) => {
 
 document.addEventListener('mouseup', (e) => {
   if (e.button === 3 && S.state && S.state.loggedIn) { e.preventDefault(); goBack(); }
+});
+
+// Bilder in den Chat: Strg+V im Chat (Screenshots, kopierte Bilder) und Ablegen von Bilddateien
+const imageFilesOf = (dt) => (dt ? [...(dt.files || [])].filter((f) => IMAGE_MIME.test(f.type)) : []);
+document.addEventListener('paste', (e) => {
+  if (!e.target.closest || !e.target.closest('#claude') || !providerReady()) return;
+  const dt = e.clipboardData;
+  let files = imageFilesOf(dt);
+  if (!files.length && dt && dt.items) files = [...dt.items].filter((it) => it.kind === 'file' && IMAGE_MIME.test(it.type)).map((it) => it.getAsFile()).filter(Boolean);
+  if (!files.length) return;
+  e.preventDefault();
+  addImageFiles(files);
+});
+const hasFiles = (e) => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+document.addEventListener('dragover', (e) => {
+  if (D.drag || !hasFiles(e)) return;
+  const panel = e.target.closest && e.target.closest('#claude');
+  document.body.classList.toggle('img-drop', !!panel);
+  if (panel) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }
+});
+document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('img-drop'); });
+document.addEventListener('drop', (e) => {
+  document.body.classList.remove('img-drop');
+  if (D.drag || !hasFiles(e) || !(e.target.closest && e.target.closest('#claude'))) return;
+  e.preventDefault();
+  if (!providerReady()) return;
+  addImageFiles(e.dataTransfer.files).then((ok) => { if (!ok) toast('Nur Bilder (PNG, JPG, GIF, WebP) lassen sich hier ablegen.', true); });
 });
 document.addEventListener('keydown', (e) => {
   if (e.altKey && e.key === 'ArrowLeft' && S.state && S.state.loggedIn) { e.preventDefault(); goBack(); }

@@ -240,8 +240,59 @@ export async function openPdf(host, { data, page = 1, zoom = 'fit', terms = [], 
   });
   ro.observe(scroller);
 
+  // Screenshot für die KI: Bildschirm-Rechteck (auch über Seitengrenzen) scharf neu rendern,
+  // unabhängig vom aktuellen Zoom. Lange Kante höchstens maxEdge, höchstens ~4 Mio. Pixel.
+  async function capture(rect, maxEdge = 2000) {
+    const cssW = rect.right - rect.left;
+    const cssH = rect.bottom - rect.top;
+    if (cssW < 2 || cssH < 2) return null;
+    const parts = [];
+    for (const p of pages) {
+      const r = p.el.getBoundingClientRect();
+      const x0 = Math.max(rect.left, r.left), y0 = Math.max(rect.top, r.top);
+      const x1 = Math.min(rect.right, r.right), y1 = Math.min(rect.bottom, r.bottom);
+      if (x1 - x0 < 2 || y1 - y0 < 2) continue;
+      const s = r.width / (p.size ? p.size.width : base.width); // Bildschirm-px je PDF-Einheit
+      parts.push({ p, dx: x0 - rect.left, dy: y0 - rect.top, x: (x0 - r.left) / s, y: (y0 - r.top) / s, w: (x1 - x0) / s, h: (y1 - y0) / s, s });
+    }
+    if (!parts.length) return null;
+    let f = Math.max(1, Math.min(4, maxEdge / Math.max(cssW, cssH)));
+    if (cssW * cssH * f * f > 4e6) f = Math.sqrt(4e6 / (cssW * cssH));
+    const out = document.createElement('canvas');
+    out.width = Math.max(1, Math.round(cssW * f));
+    out.height = Math.max(1, Math.round(cssH * f));
+    const ctx = out.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, out.width, out.height);
+    for (const part of parts) {
+      const pg = await doc.getPage(part.p.n);
+      const R = part.s * f;
+      const vp = pg.getViewport({ scale: R, offsetX: -part.x * R, offsetY: -part.y * R });
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(part.w * R));
+      c.height = Math.max(1, Math.round(part.h * R));
+      await pg.render({ canvas: c, viewport: vp }).promise;
+      ctx.drawImage(c, Math.round(part.dx * f), Math.round(part.dy * f));
+    }
+    return { canvas: out, pages: parts.map((x) => x.p.n) };
+  }
+
   const api = {
     numPages: doc.numPages,
+    capture,
+    // Ganze Seite als Bild
+    capturePage(n, maxEdge = 1800) {
+      const p = pages[Math.max(1, Math.min(doc.numPages, n)) - 1];
+      return capture(p.el.getBoundingClientRect(), maxEdge);
+    },
+    // Seitennummer unter einem Bildschirmpunkt (oder null)
+    pageAt(x, y) {
+      for (const p of pages) {
+        const r = p.el.getBoundingClientRect();
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return p.n;
+      }
+      return null;
+    },
     get page() { return current; },
     get scale() { return scale; },
     goTo(n, smooth = false) {

@@ -669,7 +669,21 @@ h1, h2, h3, h4 { font-family: var(--font-display); margin: 0; line-height: 1.2; 
 .att-chip.ctx.off { background: transparent; border: 1px dashed var(--border-strong); color: var(--muted); text-decoration: line-through; }
 .compose-box textarea { width: 100%; border: 0; outline: none; resize: none; background: transparent; padding: 11px 14px 4px; max-height: 180px; min-height: 44px; line-height: 1.45; }
 .compose-actions { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 6px 14px; }
-.compose-actions small { color: var(--muted); font-size: 11.5px; }
+.compose-actions small { color: var(--muted); font-size: 11.5px; flex: 1; min-width: 0; margin-left: 4px; }
+.compose-actions:has(.compose-attach) { padding-left: 6px; }
+.compose-attach { color: var(--muted); }
+.compose-attach:hover { color: var(--text); }
+/* Bilder im Chat: Vorschaubilder beim Schreiben und in gesendeten Nachrichten */
+.compose-imgs { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 10px 0; }
+.att-img { position: relative; width: 52px; height: 52px; border-radius: 9px; overflow: hidden; background: var(--surface-hover); box-shadow: inset 0 0 0 1px var(--border); flex: none; }
+.att-img img { width: 100%; height: 100%; object-fit: cover; display: block; cursor: zoom-in; }
+.att-img button { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; border: 0; border-radius: 50%; display: grid; place-items: center; cursor: pointer; background: rgba(0, 0, 0, .62); color: #fff; padding: 0; opacity: 0; transition: opacity .12s; }
+.att-img:hover button, .att-img button:focus-visible { opacity: 1; }
+.msg.user .att.imgs { gap: 6px; }
+.msg-img { max-width: 132px; max-height: 132px; border-radius: 12px; display: block; cursor: zoom-in; box-shadow: inset 0 0 0 1px var(--border), var(--shadow-sm); background: #fff; }
+.img-view { margin: -6px -6px 14px; display: grid; place-items: center; }
+.img-view img { max-width: 100%; max-height: calc(100vh - 160px); border-radius: 12px; background: #fff; box-shadow: 0 0 0 1px var(--border); }
+body.img-drop #claude .compose-box { border-color: var(--primary); box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent); }
 .send-btn { width: 30px; height: 30px; border-radius: 50%; border: 0; background: var(--claude-fill); color: var(--on-claude); display: grid; place-items: center; cursor: pointer; transition: filter .15s, opacity .15s; }
 .send-btn:hover { filter: brightness(1.08); }
 .send-btn:disabled { opacity: .4; cursor: default; }
@@ -864,6 +878,11 @@ h1, h2, h3, h4 { font-family: var(--font-display); margin: 0; line-height: 1.2; 
 .pick-item small { color: var(--muted); font-size: 12px; }
 .pick-empty { padding: 16px 10px; }
 .viewer-body { flex: 1; min-height: 0; display: flex; position: relative; }
+/* Ausschnitt für die KI aufziehen */
+.snip-layer { position: absolute; inset: 0; z-index: 30; cursor: crosshair; background: rgba(0, 0, 0, .14); touch-action: none; user-select: none; overflow: hidden; }
+.snip-hint { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: var(--surface); color: var(--text); box-shadow: var(--shadow-lg); font-size: 12.5px; white-space: nowrap; pointer-events: none; animation: sheet .25s var(--ease); }
+.snip-hint .ic { color: var(--primary-text); }
+.snip-box { position: absolute; border: 1.5px solid var(--primary); border-radius: 3px; background: color-mix(in srgb, var(--primary) 10%, transparent); box-shadow: 0 0 0 9999px rgba(0, 0, 0, .18); pointer-events: none; }
 .viewer-scroll { flex: 1; overflow: auto; background: var(--canvas); }
 .pdf-pages { display: flex; flex-direction: column; align-items: safe center; gap: 14px; padding: 16px 12px 72px; width: max-content; min-width: 100%; box-sizing: border-box; }
 .pdf-page { position: relative; background: #fff; box-shadow: 0 0 0 .5px rgba(0,0,0,.08), 0 2px 8px rgba(0,0,0,.1); border-radius: 2px; overflow: hidden; flex: none; }

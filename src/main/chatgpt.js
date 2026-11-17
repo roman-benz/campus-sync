@@ -2,7 +2,7 @@
 // Responses API mit store:false + stream:true; Verlauf wird lokal gehalten und komplett mitgeschickt.
 const { OpenAI } = require('openai');
 const store = require('./store');
-const { toolSpecs, validateInput, instructions } = require('./ai-tools');
+const { toolSpecs, validateInput, instructions, imageBlocks } = require('./ai-tools');
 const { AuthRequiredError, log } = require('./chatgpt-auth');
 
 // Basis-URL nur für Tests überschreibbar
@@ -29,6 +29,18 @@ function toInputItems(output) {
     }
   }
   return items;
+}
+
+// Text- und Bild-Blöcke (Claude-Format aus ai-tools) als Eingabe der Responses API
+function toInputContent(blocks) {
+  const content = [];
+  for (const b of blocks) {
+    if (b.type === 'text') content.push({ type: 'input_text', text: b.text });
+    else if (b.type === 'image' && b.source && b.source.type === 'base64') {
+      content.push({ type: 'input_image', image_url: `data:${b.source.media_type};base64,${b.source.data}`, detail: 'auto' });
+    }
+  }
+  return content;
 }
 
 // Standard: erstes Modell, das kein „Pro“-Modell ist – die denken oft minutenlang
@@ -86,7 +98,7 @@ class ChatGPTAssistant {
     throw new Error('Für deinen ChatGPT-Plan sind keine Modelle verfügbar.');
   }
 
-  async send({ conversationId, text, attachments = [], context = {} }, emit) {
+  async send({ conversationId, text, attachments = [], images = [], context = {} }, emit) {
     let conv = this.conversations.get(conversationId);
     if (!conv) {
       conv = { input: [], busy: false, stopped: false, abort: null };
@@ -97,9 +109,9 @@ class ChatGPTAssistant {
     const startLen = conv.input.length;
 
     try {
-      const blocks = await this.tools.attachmentBlocks(attachments, 'openai');
+      const blocks = [...(await this.tools.attachmentBlocks(attachments, 'openai')), ...imageBlocks(images)];
       const ctx = this.tools.describeContext(context);
-      const content = blocks.filter((b) => b.type === 'text').map((b) => ({ type: 'input_text', text: b.text }));
+      const content = toInputContent(blocks);
       content.push({ type: 'input_text', text: ctx ? `${ctx}\n\n${text}` : text });
       conv.input.push({ type: 'message', role: 'user', content });
 
@@ -269,4 +281,4 @@ class ChatGPTAssistant {
   }
 }
 
-module.exports = { ChatGPTAssistant, defaultModel };
+module.exports = { ChatGPTAssistant, defaultModel, toInputContent };

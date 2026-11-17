@@ -1,6 +1,7 @@
 // Demo-Modus mit Beispieldaten (ohne Moodle-Zugang): npm run demo
 // Optional: --shots <ordner> erstellt Screenshots aller Ansichten und beendet die App,
-// mit --tt zusätzlich nur den Stundenplan (Verschieben per Maus und Vorschlag per Mail).
+// mit --tt zusätzlich nur den Stundenplan (Verschieben per Maus und Vorschlag per Mail),
+// mit --img nur Bilder im Chat (PDF-Ausschnitt, Strg+V, „Seite erklären“ mit Seitenbild).
 const { app, BrowserWindow } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -263,9 +264,95 @@ async function shots() {
     await run('closeModal()');
   };
 
+  // Bilder im Chat: Ausschnitt aus dem PDF mit echten Mausereignissen, Klick = ganze Seite, Esc bricht ab,
+  // Strg+V mit Bild, „Seite erklären“ mit Seitenbild. Die Anfragen gehen statt an die KI an einen
+  // Mitschreiber, der Typ und Größe der Bilder ausgibt.
+  const imgShots = async () => {
+    const { ipcMain } = require('electron');
+    const mouse = (type, x, y) => win.webContents.sendInputEvent({ type, x, y, button: 'left', clickCount: 1, modifiers: type === 'mouseMove' ? ['leftButtonDown'] : [] });
+    const sent = [];
+    ipcMain.removeHandler('ai:send');
+    ipcMain.handle('ai:send', (e, p) => {
+      sent.push(p);
+      const ev = (type, data = {}) => e.sender.send('ai:event', { conversationId: p.conversationId, type, ...data });
+      ev('text-start');
+      ev('text', { text: `(Demo) ${(p.images || []).length} Bild(er) erhalten.` });
+      ev('done', {});
+      return true;
+    });
+    const desc = (p) => JSON.stringify({ text: p.text.slice(0, 70), images: (p.images || []).map((i) => `${i.name} · ${i.mediaType} · ${Math.round((i.data.length * 0.75) / 1024)} KB`) });
+    const imgs = () => run(`JSON.stringify(S.chat.images.map((i) => i.name + ' ' + i.w + 'x' + i.h + ' ' + i.mediaType))`);
+    await run(`openDoc(Object.values(S.data.files).find((f) => f.downloaded && isPdf(f)).id)`);
+    await wait(2500);
+    await run(`if (document.querySelector('#claude').classList.contains('closed')) actions['toggle-claude']()`);
+    await wait(500);
+    await run(`document.querySelector('.vt-tools [data-action=snip-start]').click()`);
+    await wait(300);
+    const r = await run(`(() => { const b = V.el.querySelector('.pdf-page[data-page="1"]').getBoundingClientRect(); return { x: Math.round(b.left + b.width * 0.08), y: Math.round(b.top + b.height * 0.06), x2: Math.round(b.left + b.width * 0.9), y2: Math.round(b.top + b.height * 0.35) }; })()`);
+    mouse('mouseDown', r.x, r.y);
+    for (let i = 1; i <= 12; i++) {
+      mouse('mouseMove', Math.round(r.x + ((r.x2 - r.x) * i) / 12), Math.round(r.y + ((r.y2 - r.y) * i) / 12));
+      await wait(20);
+    }
+    await snap('19-ausschnitt-ziehen');
+    mouse('mouseUp', r.x2, r.y2);
+    await wait(1200);
+    console.log('IMG-AUSSCHNITT', await imgs(), 'Ebene weg:', await run(`!document.querySelector('.snip-layer')`));
+    await snap('20-ausschnitt-angehaengt');
+    // Klick ohne Ziehen: ganze Seite
+    await run(`startSnip(V)`);
+    await wait(200);
+    mouse('mouseDown', r.x + 40, r.y + 40);
+    mouse('mouseUp', r.x + 40, r.y + 40);
+    await wait(1200);
+    console.log('IMG-KLICK-SEITE', await imgs());
+    // Esc bricht ab
+    await run(`startSnip(V)`);
+    await wait(200);
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+    await wait(200);
+    console.log('IMG-ESC', await run(`document.querySelector('.snip-layer') ? 'Ebene noch da' : 'abgebrochen'`), await run('S.chat.images.length'));
+    // Strg+V mit einem Bild: Paste-Ereignis mit erzeugtem PNG (die echte Zwischenablage bleibt unberührt)
+    await run(`(async () => {
+      const c = document.createElement('canvas'); c.width = 900; c.height = 420;
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 900, 420);
+      g.fillStyle = '#1d1d1f'; g.font = '48px serif'; g.fillText('U = R · I,   P = U · I', 60, 140);
+      g.font = '28px sans-serif'; g.fillText('Tafelbild aus der Vorlesung', 60, 220);
+      const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+      const dt = new DataTransfer(); dt.items.add(new File([blob], 'image.png', { type: 'image/png' }));
+      const inp = document.querySelector('#chat-input'); inp.focus();
+      inp.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    })()`);
+    await wait(1200);
+    console.log('IMG-EINGEFUEGT', await imgs());
+    await snap('21-drei-bilder');
+    await run(`document.documentElement.dataset.theme = 'dark'`);
+    await snap('21b-drei-bilder-dunkel');
+    await run(`document.documentElement.dataset.theme = 'light'`);
+    await run(`document.querySelector('#chat-input').value = 'Was bedeutet die Formel oben?'; sendWithSelection()`);
+    await wait(900);
+    console.log('IMG-GESENDET', sent.length ? desc(sent[sent.length - 1]) : '(nichts)', 'Bilder danach im Feld:', await run('S.chat.images.length'));
+    await snap('22-gesendet');
+    await run(`document.querySelector('.msg.user .msg-img').click()`);
+    await wait(500);
+    await snap('23-bild-gross');
+    await run('closeModal()');
+    // „Diese Seite erklären“ aus dem ⋯-Menü: Seite geht als Bild mit
+    await run(`document.querySelector('.vt-tools [data-action=viewer-more]').click()`);
+    await wait(200);
+    await run(`document.querySelector('#vmenu [data-action=viewer-ask][data-mode=page]').click()`);
+    await wait(2000);
+    console.log('IMG-SEITE-ERKLAEREN', sent.length > 1 ? desc(sent[sent.length - 1]) : '(nichts)');
+    await snap('24-seite-erklaeren');
+  };
+
   win.setSize(1440, 900);
   win.show();
   await wait(1500);
+  if (process.argv.includes('--img')) {
+    await imgShots();
+    return app.exit(0);
+  }
   if (process.argv.includes('--tt')) {
     await ttShots();
     return app.exit(0);
