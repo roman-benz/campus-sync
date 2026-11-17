@@ -12,6 +12,7 @@
     "icon": "electron scripts/make-icon.js",
     "dist": "electron-builder --win nsis --publish never",
     "demo": "electron scripts/demo.js",
+    "test": "node --test \"test/*.test.js\"",
     "release": "electron-builder --win nsis --publish always",
     "web:build": "node web/build.mjs",
     "web:dev": "node web/build.mjs && node web/dev-server.mjs"

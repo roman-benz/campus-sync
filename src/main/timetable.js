@@ -9,6 +9,9 @@ const store = require('./store');
 const RAPLA_TEMPLATE = {
   name: 'TSA25 · DHBW Ravensburg',
   url: 'https://rapla.dhbw.de/rapla/internal_calendar?user=muenzer@vw.ba.ba-ravensburg.de&file=TSA25',
+  // Empfänger für Verschiebevorschläge zu diesem Plan (Kurssprecher). Leer: Adresse im Dialog eintragen,
+  // sie wird dann gemerkt. Achtung: das Repo ist öffentlich, eine Adresse hier ist für alle sichtbar.
+  proposalTo: '',
 };
 const REFRESH_MS = 2 * 60 * 60 * 1000;
 const WINDOW_PAST_DAYS = 120;

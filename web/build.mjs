@@ -43,10 +43,11 @@ html = vendorPath(html)
   <link rel="manifest" href="/manifest.webmanifest" />`)
   .replace('<link rel="stylesheet" href="styles.css" />', '<link rel="stylesheet" href="/styles.css" />\n  <link rel="stylesheet" href="/web.css" />')
   .replace('<script src="icons.js"></script>', '<script src="/backend.js"></script>\n  <script src="/icons.js"></script>')
+  .replace('<script src="tt-proposal.js"></script>', '<script src="/tt-proposal.js"></script>')
   .replace('<script src="app.js"></script>', '<script src="/app.js"></script>');
 fs.writeFileSync(path.join(out, 'index.html'), html);
 
-for (const f of ['app.js', 'icons.js', 'styles.css']) fs.copyFileSync(r('src/renderer', f), path.join(out, f));
+for (const f of ['app.js', 'icons.js', 'tt-proposal.js', 'styles.css']) fs.copyFileSync(r('src/renderer', f), path.join(out, f));
 // viewer.js lädt pdf.js relativ zu sich selbst
 fs.writeFileSync(path.join(out, 'viewer.js'), fs.readFileSync(r('src/renderer/viewer.js'), 'utf8').replaceAll('../../node_modules/', './vendor/'));
 

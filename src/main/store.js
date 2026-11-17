@@ -22,6 +22,9 @@ const DEFAULTS = {
   // Stundenpläne (iCal/Rapla); der TSA25-Plan ist als Vorlage vorbelegt
   timetables: [{ id: 'tsa25', name: 'TSA25 · DHBW Ravensburg', url: 'https://rapla.dhbw.de/rapla/internal_calendar?user=muenzer@vw.ba.ba-ravensburg.de&file=TSA25' }],
   timetableActive: 'tsa25',
+  // Verschiebevorschläge: Adresse des Kurssprechers und die verschobenen Stunden je Plan (nur auf diesem Gerät)
+  ttProposalTo: '',
+  ttMoves: {},
   mensaUrl: 'https://zuf.my-mensa.de/mensatogo.php?mensa=mensa_fallenbrunnen',
   // So lang muss eine Pause mindestens sein, damit es für einen Mensabesuch reicht
   mensaMinBreak: 44,

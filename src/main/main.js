@@ -453,6 +453,10 @@ function registerIpc() {
     shell.openPath(dir);
   });
   ipcMain.handle('open:external', (_e, url) => openExternal(url));
+  // Fertige Mail im Standard-Mailprogramm öffnen (Verschiebevorschlag im Stundenplan)
+  ipcMain.handle('open:mail', (_e, url) => {
+    if (typeof url === 'string' && /^mailto:/i.test(url)) return shell.openExternal(url);
+  });
   ipcMain.handle('news:clear', () => {
     if (sync.cache) {
       sync.cache.newItems = [];
