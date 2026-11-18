@@ -1196,3 +1196,50 @@ body.tt-grabbing, body.tt-grabbing * { cursor: grabbing !important; user-select:
   .segmented button.on, .primary-nav a.active, .tabs a.active, .settings-nav a.active, .vtab.active, .mensa-slot.on { outline: 2px solid Highlight; outline-offset: -2px; }
   .chip, .card, .vhud { border: 1px solid CanvasText; }
 }
+
+/* ---------- Noten (Dualis) ---------- */
+.grade-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.grade-tile { background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; }
+.grade-tile > span { color: var(--muted); font-size: 13px; font-weight: 550; }
+.grade-tile > b { font-size: 28px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.grade-tile > small { color: var(--muted); font-size: 12px; }
+.grade-tile .progress { flex: none; height: 6px; }
+.grade-group { margin-bottom: 16px; overflow: hidden; }
+.grade-group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px 4px; }
+.grade-group-head h3 { font-size: 15px; font-weight: 650; margin: 0; }
+.grade-group .table th.num, .grade-group .table td.num { text-align: right; font-variant-numeric: tabular-nums; width: 80px; }
+.grade-note { margin-top: 4px; }
+.dualis-login { max-width: 520px; padding: 22px 24px; }
+.dualis-login h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; }
+.dualis-login form { display: flex; flex-direction: column; gap: 6px; margin: 14px 0; }
+.dualis-login form .input { margin-bottom: 6px; }
+.dualis-login form .btn { align-self: flex-start; margin-top: 6px; }
+.dualis-login .err { background: var(--danger-soft); color: var(--danger); padding: 8px 10px; border-radius: 10px; margin: 0; }
+.grade-group .table { table-layout: fixed; }
+.grade-group .table th:nth-child(1) { width: 130px; }
+.grade-group .table th:nth-child(5) { width: 170px; }
+.grade-group .table td:nth-child(2) { overflow-wrap: anywhere; }
+.grade-group tr.grade-new td { background: var(--primary-soft); }
+.chip.new { background: var(--primary); color: var(--on-primary); height: 19px; font-size: 11px; margin-left: 6px; vertical-align: 1px; }
+
+/* Notenprofil */
+.grade-chart { margin-bottom: 16px; padding-bottom: 30px; }
+.grade-chart .grade-group-head p { margin: 2px 0 0; }
+.gc { --gc-label: 240px; padding: 6px 22px 0 18px; }
+.gc-row { display: grid; grid-template-columns: var(--gc-label) 1fr; align-items: center; min-height: 30px; }
+.gc-name { font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 14px; }
+.gc-axis { min-height: 22px; }
+.gc-ticks, .gc-track { position: relative; height: 100%; min-height: 22px; }
+.gc-ticks span { position: absolute; transform: translateX(-50%); font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; top: 3px; }
+.gc-body { position: relative; }
+.gc-grid { position: absolute; top: 0; bottom: 0; left: var(--gc-label); right: 0; pointer-events: none; }
+.gc-grid > i { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border); }
+.gc-gpa { position: absolute; top: -4px; bottom: 0; border-left: 2px dashed var(--muted); }
+.gc-gpa span { position: absolute; top: 100%; left: 0; transform: translate(-50%, 3px); font-size: 11.5px; font-weight: 650; color: var(--text-2); white-space: nowrap; background: var(--surface); padding: 0 4px; }
+.gc-hit { position: absolute; top: 50%; width: 28px; height: 28px; margin: -14px 0 0 -14px; display: grid; place-items: center; cursor: default; border-radius: 50%; outline: none; }
+.gc-hit > i { width: 12px; height: 12px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 2px var(--surface); transition: transform .12s ease; }
+.gc-hit.fail > i { background: var(--danger); }
+.gc-hit.new > i { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--primary); }
+.gc-hit:hover > i, .gc-hit:focus-visible > i { transform: scale(1.35); }
+.gc-hit[data-tip]:hover::after, .gc-hit[data-tip]:focus-visible::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); background: var(--text); color: var(--surface); font-size: 12px; font-weight: 550; padding: 6px 9px; border-radius: 8px; white-space: nowrap; z-index: 5; box-shadow: var(--shadow-sm); pointer-events: none; }
+@media (max-width: 900px) { .gc { --gc-label: 150px; } }

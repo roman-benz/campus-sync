@@ -1,4 +1,4 @@
-# Baut den Windows-Installer bei jedem Versions-Tag (v*) und veröffentlicht ihn als GitHub-Release.
+# Baut den Windows-Installer (Tauri) bei jedem Versions-Tag (v*) und veröffentlicht ihn als GitHub-Release.
 name: Release
 
 on:
@@ -22,23 +22,59 @@ jobs:
 
       - run: npm ci
 
-      # Nur bauen – das Hochladen übernimmt der nächste Schritt in einem Rutsch.
-      # (electron-builder lädt Dateien parallel hoch und legt dabei gelegentlich zwei Releases an.)
-      - name: Installer bauen
-        run: npx electron-builder --win nsis --publish never
+      - uses: dtolnay/rust-toolchain@stable
 
-      # Ein Release mit allen Dateien: Installer, blockmap (Differenz-Updates), latest.yml (Auto-Update)
-      # und der Installer unter festem Namen für .../releases/latest/download/Chadoodle-Setup.exe
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Tauri-CLI installieren
+        run: cargo install tauri-cli --version "^2" --locked
+
+      # Signiert die Update-Datei (Schlüssel als Repository-Secret TAURI_SIGNING_PRIVATE_KEY)
+      - name: Installer bauen
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: cargo tauri build
+
+      # Ein Release mit allen Dateien:
+      #  - Chadoodle-Setup-<v>.exe (+ .sig) und latest.json  → Updates der Tauri-Version
+      #  - latest.yml                                          → Umstieg bestehender Electron-Installationen
+      #    (electron-updater lädt denselben Installer; der entfernt die alte Version, Profil bleibt)
+      #  - Chadoodle-Setup.exe                                 → fester Link .../releases/latest/download/Chadoodle-Setup.exe
       - name: Release veröffentlichen
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
-          Copy-Item "out/Chadoodle-Setup-$version.exe" "out/Chadoodle-Setup.exe"
+          $repo = "${{ github.repository }}"
+          $src = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          New-Item -ItemType Directory -Force out | Out-Null
+          $exe = "out/Chadoodle-Setup-$version.exe"
+          Copy-Item $src.FullName $exe
+          Copy-Item "$($src.FullName).sig" "$exe.sig"
+          Copy-Item $exe "out/Chadoodle-Setup.exe"
+          $date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+          @{
+            version = $version
+            notes = "Chadoodle $version"
+            pub_date = $date
+            platforms = @{ "windows-x86_64" = @{ signature = (Get-Content "$exe.sig" -Raw).Trim(); url = "https://github.com/$repo/releases/download/v$version/Chadoodle-Setup-$version.exe" } }
+          } | ConvertTo-Json -Depth 5 | Set-Content out/latest.json -Encoding utf8
+          $bytes = [IO.File]::ReadAllBytes($exe)
+          $sha = [Convert]::ToBase64String([Security.Cryptography.SHA512]::Create().ComputeHash($bytes))
+          @(
+            "version: $version",
+            "files:",
+            "  - url: Chadoodle-Setup-$version.exe",
+            "    sha512: $sha",
+            "    size: $($bytes.Length)",
+            "path: Chadoodle-Setup-$version.exe",
+            "sha512: $sha",
+            "releaseDate: '$date'"
+          ) | Set-Content out/latest.yml -Encoding utf8
           gh release create "v$version" `
-            "out/Chadoodle-Setup-$version.exe" `
-            "out/Chadoodle-Setup-$version.exe.blockmap" `
-            "out/latest.yml" `
-            "out/Chadoodle-Setup.exe" `
+            $exe "$exe.sig" out/latest.json out/latest.yml out/Chadoodle-Setup.exe `
             --title "Chadoodle $version" --generate-notes

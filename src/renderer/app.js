@@ -41,6 +41,7 @@ const S = {
   // Stundenplan: Liste der Pläne, angezeigte Woche (Montag 0 Uhr) und deren Termine
   // Mensa: Speiseplan, gewählter Tag, Stundenplan des Tags; Bestellen: Warenkorb je Tag (a_id → Anzahl),
   // Abholzeiten/Restmengen des Tags (opt), gewählte Abholzeit je Tag, Kontaktdaten, eigene Bestellungen
+  dualis: { st: null, loading: false, sending: false, err: '' },
   mensa: { data: null, day: null, busy: false, error: '', url: null, defaultUrl: null, form: '', tt: null, cart: {}, opt: null, time: {}, contact: null, agree: false, sending: false, orders: null },
   // Verschiebevorschlag: Bemerkung und Empfänger im Dialog, zuletzt gebaute Mail (proposal)
   tt: { list: null, active: null, template: null, week: ttMonday(new Date()), events: [], loadedKey: null, busy: false, form: { name: '', url: '' }, note: '', to: null, proposal: null },
@@ -205,6 +206,8 @@ async function boot() {
   api.onDataUpdated(async () => { S.data = await api.data(); renderNav(); renderLeft(); renderMain(); });
   api.onFilesUpdated(async () => { S.data = await api.data(); if (['course', 'module', 'dashboard'].includes(S.route.name)) renderMain(); });
   api.onMensa(() => { if (S.route.name === 'mensa') loadMensa(); });
+  if (api.onDualis) api.onDualis(() => loadDualis());
+  if (api.onNavigate) api.onNavigate((route) => { if (S.data && route) go(route); });
   // Der Assistent hat einen Warenkorb vorbereitet (bestellt wird erst nach Klick des Nutzers)
   api.onMensaPrepare(({ date, items, time }) => {
     const m = S.mensa;
@@ -396,6 +399,23 @@ async function loginDone() {
 }
 
 const submits = {
+  async 'dualis-login'() {
+    const d = S.dualis;
+    const user = $('#dualis-user').value.trim();
+    const pass = $('#dualis-pass').value;
+    if (!user || !pass || d.sending) return;
+    d.sending = true;
+    d.err = '';
+    renderMain();
+    try {
+      d.st = await api.dualisLogin(user, pass);
+      toast('Mit Dualis verbunden');
+    } catch (e) {
+      d.err = cleanErr(e);
+    }
+    d.sending = false;
+    renderMain();
+  },
   async 'mensa-url'() {
     const m = S.mensa;
     const url = (m.form || '').trim();
@@ -502,6 +522,7 @@ function renderNav() {
       <a href="#" data-action="go" data-route="events" class="${r === 'events' ? 'active' : ''}">Fristen</a>
       <a href="#" data-action="go" data-route="timetable" class="${r === 'timetable' ? 'active' : ''}">Stundenplan</a>
       <a href="#" data-action="go" data-route="mensa" class="${r === 'mensa' ? 'active' : ''}">Mensa</a>
+      ${api.dualisStatus ? `<a href="#" data-action="go" data-route="grades" class="${r === 'grades' ? 'active' : ''}">Noten</a>` : ''}
       ${navDocsHtml()}
     </nav>
     <form class="nav-search" data-submit="nav-search"><div class="input-icon">${icon('search', 'sm')}<input id="nav-q" class="input" placeholder="In Dokumenten suchen…" title="Strg+Umschalt+F" value="${esc(r === 'search' ? S.route.params.q || '' : '')}" /></div></form>
@@ -634,6 +655,7 @@ function renderMain() {
   else if (r.name === 'events') html = renderEventsPage();
   else if (r.name === 'timetable') html = renderTimetable();
   else if (r.name === 'mensa') html = renderMensa();
+  else if (r.name === 'grades') html = renderGrades();
   else if (r.name === 'settings') html = renderSettings();
   else if (r.name === 'viewer') html = renderViewer();
   else if (r.name === 'search') html = renderSearch();
@@ -1293,6 +1315,112 @@ function dishTags(e) {
   const diet = e.tags.filter((t) => t.diet).map((t) => `<span class="diet diet-${esc(t.code.toLowerCase())}">${esc(t.text)}</span>`).join('');
   const allergens = e.tags.filter((t) => !t.diet).map((t) => t.text);
   return { diet, allergens };
+}
+
+// ---------- Noten (Dualis) ----------
+async function loadDualis() {
+  if (!api.dualisStatus) return;
+  S.dualis.st = await api.dualisStatus().catch(() => S.dualis.st);
+  if (S.route.name === 'grades') renderMain();
+}
+
+// Notenprofil: jede Note als Punkt auf der Skala (1,0 = beste, links), in Studienreihenfolge,
+// mit dem Gesamt-GPA als Bezugslinie. Exakte Werte stehen in den Tabellen darunter.
+function gradeChartHtml(data) {
+  const num = (s) => parseFloat(String(s || '').replace(',', '.'));
+  const mods = data.groups.flatMap((g) => g.modules).filter((m) => Number.isFinite(num(m.grade))).sort((a, b) => a.no.localeCompare(b.no));
+  if (mods.length < 2) return '';
+  const max = Math.max(4, Math.ceil(Math.max(...mods.map((m) => num(m.grade)))));
+  const x = (g) => ((Math.min(max, Math.max(1, g)) - 1) / (max - 1)) * 100;
+  const fmt = (n) => n.toFixed(1).replace('.', ',');
+  const ticks = Array.from({ length: max }, (_, i) => i + 1);
+  const gpa = num(data.gpa.total);
+  return `<div class="card grade-chart">
+    <div class="grade-group-head"><div><h3>Notenprofil</h3><p class="muted small">Jedes benotete Modul in Studienreihenfolge · links ist besser${Number.isFinite(gpa) ? ' · gestrichelt: dein Gesamt-GPA' : ''}</p></div></div>
+    <div class="gc">
+      <div class="gc-row gc-axis"><span></span><div class="gc-ticks">${ticks.map((t) => `<span style="left:${x(t)}%">${fmt(t)}</span>`).join('')}</div></div>
+      <div class="gc-body">
+        <div class="gc-grid" aria-hidden="true">${ticks.map((t) => `<i style="left:${x(t)}%"></i>`).join('')}
+          ${Number.isFinite(gpa) ? `<b class="gc-gpa" style="left:${x(gpa)}%"><span>Ø ${esc(data.gpa.total)}</span></b>` : ''}</div>
+        ${mods.map((m) => {
+          const g = num(m.grade);
+          const tip = `${m.name}: ${m.grade}${m.credits ? ` · ${String(m.credits).replace('.', ',')} Credits` : ''}${Number.isFinite(gpa) ? ` · ${g < gpa ? 'besser als' : g > gpa ? 'schlechter als' : 'genau'} dein Schnitt` : ''}`;
+          return `<div class="gc-row"><span class="gc-name" title="${esc(m.name)}">${esc(m.name)}</span><div class="gc-track"><span class="gc-hit${g > 4 ? ' fail' : ''}${isNewGrade(m) ? ' new' : ''}" style="left:${x(g)}%" data-tip="${esc(tip)}" tabindex="0" aria-label="${esc(tip)}"><i></i></span></div></div>`;
+        }).join('')}
+      </div>
+    </div></div>`;
+}
+
+// Neue Noten bleiben 7 Tage markiert
+const isNewGrade = (m) => !!(m.newAt && Date.now() - m.newAt < 7 * 86400000);
+
+function gradeChip(m) {
+  const st = (m.status || '').toLowerCase();
+  if (st.includes('nicht')) return `<span class="chip danger">${esc(m.status)}</span>`;
+  if (st.includes('bestanden')) return `<span class="chip ok">${esc(m.status)}</span>`;
+  return `<span class="chip">${esc(m.status || 'Offen')}</span>`;
+}
+
+function renderGrades() {
+  const d = S.dualis;
+  if (!d.st && !d.loading) {
+    d.loading = true;
+    loadDualis().finally(() => (d.loading = false));
+  }
+  const st = d.st;
+  if (!st) return `<div class="page"><div class="card"><div class="empty">${icon('refresh', 'spin')}<div>Lade Noten…</div></div></div></div>`;
+
+  // Nicht verbunden oder gespeichertes Kennwort abgelehnt (z. B. geändert) → Anmeldeformular
+  const relogin = st.configured && st.errorCode === 'auth';
+  if (!st.configured || relogin) {
+    return `<div class="page"><div class="page-head"><div><h1>Noten</h1><p>Deine Modulnoten aus Dualis</p></div></div>
+      <div class="card dualis-login">
+        <h3>${icon('award', 'sm')} ${relogin ? 'Bei Dualis neu anmelden' : 'Mit Dualis verbinden'}</h3>
+        <p class="muted">${relogin ? 'Dualis hat das gespeicherte Kennwort abgelehnt – vermutlich wurde es geändert. Melde dich einmal neu an, danach bleibst du wieder dauerhaft verbunden.' : 'Melde dich einmal mit deinen Dualis-Zugangsdaten an – danach bleibst du dauerhaft verbunden. Chadoodle lädt deine Leistungsübersicht, aktualisiert sie im Hintergrund und meldet neue Noten mit einer Windows-Benachrichtigung.'}</p>
+        <form data-submit="dualis-login">
+          <label class="small muted" for="dualis-user">Benutzername</label>
+          <input id="dualis-user" class="input" autocomplete="username" spellcheck="false" value="${esc(st.user || '')}" />
+          <label class="small muted" for="dualis-pass">Kennwort</label>
+          <input id="dualis-pass" class="input" type="password" autocomplete="current-password" />
+          ${d.err ? `<p class="err small">${esc(d.err)}</p>` : ''}
+          <button class="btn primary" ${d.sending ? 'disabled' : ''}>${d.sending ? icon('refresh', 'spin') + ' Verbinde…' : 'Anmelden'}</button>
+        </form>
+        <p class="muted small">Benutzername und Kennwort werden nur auf diesem PC gespeichert, verschlüsselt mit Windows (DPAPI), und nur an dualis.dhbw.de gesendet – nicht an das Chadoodle-Konto und nicht an einen KI-Anbieter.</p>
+      </div></div>`;
+  }
+
+  const data = st.data;
+  const head = `<div class="page-head"><div><h1>Noten</h1><p>${data && data.program ? esc(data.program) + ' · ' : ''}Dualis${st.fetchedAt ? ` · Stand ${relTime(st.fetchedAt)}` : ''}${st.error ? ` · <span style="color:var(--warning)">${esc(st.error)}</span>` : ''}</p></div>
+    <div class="tt-nav">
+      <button class="btn sm" data-action="external" data-url="https://dualis.dhbw.de/">${icon('external', 'sm')} Dualis</button>
+      <button class="icon-btn" data-action="dualis-refresh" title="Jetzt aktualisieren">${icon('refresh', st.busy ? 'spin' : '')}</button>
+      <button class="icon-btn" data-action="dualis-logout" title="Dualis trennen">${icon('logout')}</button>
+    </div></div>`;
+  if (!data) return `<div class="page">${head}<div class="card"><div class="empty">${icon(st.busy ? 'refresh' : 'cloudoff', st.busy ? 'spin' : '')}<div>${st.busy ? 'Lade Noten aus Dualis…' : 'Noch keine Noten geladen.'}</div></div></div></div>`;
+
+  const mods = data.groups.flatMap((g) => g.modules);
+  const graded = mods.filter((m) => m.grade).length;
+  const credits = data.total && data.total.credits != null ? data.total.credits : mods.reduce((s, m) => s + (m.grade ? m.credits || 0 : 0), 0);
+  const fmt = (n) => String(n).replace('.', ',');
+  const pct = data.required ? Math.min(100, Math.round((credits / data.required) * 100)) : null;
+  const tile = (label, value, sub = '') => `<div class="grade-tile"><span>${label}</span><b>${esc(value || '–')}</b>${sub}</div>`;
+  const tiles = `<div class="grade-tiles">
+      ${tile('Gesamt-GPA', data.gpa.total)}
+      ${tile('Hauptfach-GPA', data.gpa.major)}
+      ${tile('Credits', fmt(credits), data.required ? `<div class="progress"><i style="width:${pct}%"></i></div><small>${pct} % von ${fmt(data.required)}</small>` : '')}
+      ${tile('Module mit Note', `${graded} / ${mods.length}`)}
+    </div>`;
+  const groups = data.groups
+    .map(
+      (g) => `<div class="card grade-group">
+      <div class="grade-group-head"><h3>${esc(g.title)}</h3>${g.sum && g.sum.credits != null ? `<span class="chip quiet">${fmt(g.sum.credits)} Credits</span>` : ''}</div>
+      <table class="table"><thead><tr><th>Nr.</th><th>Modul</th><th class="num">Credits</th><th class="num">Note</th><th>Status</th></tr></thead><tbody>
+      ${g.modules.map((m) => `<tr class="${isNewGrade(m) ? 'grade-new' : ''}"><td class="muted small nowrap">${esc(m.no)}</td><td>${esc(m.name)}${isNewGrade(m) ? ' <span class="chip new">Neu</span>' : ''}</td><td class="num">${m.credits != null ? fmt(m.credits) : '–'}</td><td class="num"><b>${esc(m.grade || '–')}</b></td><td>${gradeChip(m)}</td></tr>`).join('')}
+      </tbody></table></div>`,
+    )
+    .join('');
+  return `<div class="page">${head}${tiles}${gradeChartHtml(data)}${groups}
+    <p class="muted small grade-note">Du bleibst dauerhaft verbunden. Die Noten aktualisieren sich alle drei Stunden und nach dem Standby im Hintergrund; bei einer neuen Note kommt eine Windows-Benachrichtigung, die stehen bleibt, bis du sie wegklickst. Der Assistent sieht die Noten nur, wenn du Noten unter Einstellungen → KI-Assistent freigibst.</p></div>`;
 }
 
 function renderMensa() {
@@ -3187,6 +3315,20 @@ function endSnip(d) {
 }
 
 const actions = {
+  'dualis-refresh': async () => {
+    S.dualis.st = { ...(S.dualis.st || {}), busy: true };
+    renderMain();
+    S.dualis.st = await api.dualisRefresh().catch(() => S.dualis.st);
+    if (S.route.name === 'grades') renderMain();
+  },
+  'dualis-logout': () => showModal(`<h3>Dualis trennen?</h3>
+    <p class="muted">Benutzername, Kennwort und die gespeicherten Noten werden von diesem PC gelöscht. Dein Dualis-Konto bleibt unverändert.</p>
+    <div class="row"><button class="btn" data-action="modal-close">Abbrechen</button><button class="btn danger" data-action="dualis-logout-ok">Trennen</button></div>`),
+  'dualis-logout-ok': async () => {
+    closeModal();
+    S.dualis.st = await api.dualisLogout();
+    renderMain();
+  },
   'mensa-day': (el) => { S.mensa.day = el.dataset.v; renderMain(); },
   'mensa-refresh': () => { loadMensa(true); loadMensaOpt(true); },
   'mensa-order': () => { closeModal(); api.mensaOrder(); },

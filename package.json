@@ -1,7 +1,7 @@
 {
   "name": "moodle-desktop",
   "productName": "Chadoodle",
-  "version": "1.10.0",
+  "version": "2.0.0",
   "description": "Desktop-App für Moodle-Kurse mit lokaler Hintergrund-Synchronisation, PDF-Viewer, Volltextsuche und KI-Lernassistent (ChatGPT oder Claude)",
   "main": "src/main/main.js",
   "author": "Roman Benz",
@@ -15,7 +15,10 @@
     "test": "node --test \"test/*.test.js\"",
     "release": "electron-builder --win nsis --publish always",
     "web:build": "node web/build.mjs",
-    "web:dev": "node web/build.mjs && node web/dev-server.mjs"
+    "web:dev": "node web/build.mjs && node web/dev-server.mjs",
+    "tauri:web": "node tauri/build.mjs",
+    "tauri:dev": "node tauri/build.mjs --dev && cargo build --manifest-path src-tauri/Cargo.toml && src-tauri\targetdebugChadoodle.exe",
+    "tauri:dist": "cargo tauri build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

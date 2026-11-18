@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Nur das Hauptfenster (eigene Oberfläche) darf die App-Befehle aufrufen – Anmelde- und Mensa-Fenster nicht.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

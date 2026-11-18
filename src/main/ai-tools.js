@@ -115,6 +115,11 @@ const TOOL_SPECS = [
     input_schema: { type: 'object', properties: { course_id: { type: 'integer' } }, required: ['course_id'] },
   },
   {
+    name: 'get_study_results',
+    description: 'Offizielle Noten aus Dualis (Leistungsübersicht des Studiengangs): alle Module mit Note, Credits und Status, Gesamt-/Hauptfach-GPA und erreichte Credits.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
     name: 'get_timetable',
     description: 'Vorlesungen aus dem aktiven Stundenplan (Rapla/iCal) mit Uhrzeit, Titel und Raum, nach Tagen gruppiert.',
     input_schema: {
@@ -203,7 +208,7 @@ function orderName(site) {
 
 // Werkzeuge, die der KI aktuell angeboten werden
 function toolSpecs() {
-  return gradesAllowed() ? TOOL_SPECS : TOOL_SPECS.filter((t) => t.name !== 'get_grades');
+  return gradesAllowed() ? TOOL_SPECS : TOOL_SPECS.filter((t) => t.name !== 'get_grades' && t.name !== 'get_study_results');
 }
 
 function validateInput(name, input) {
@@ -235,7 +240,7 @@ function instructions(cache) {
     '- Bilder und Screenshots (z. B. Ausschnitte aus PDF-Seiten, Tafelbilder, Aufgaben) siehst du direkt: lies Formeln, Diagramme und Handschrift daraus ab, erkläre sie und such bei Bedarf die passende Stelle in den Unterlagen.',
     '- Wenn die Unterlagen etwas nicht abdecken, sag das und ergänze dann mit allgemeinem Fachwissen (klar gekennzeichnet).',
     gradesAllowed()
-      ? '- Für Termine, Abgaben und Noten nutze get_deadlines, read_activity und get_grades.'
+      ? '- Für Termine, Abgaben und Noten nutze get_deadlines, read_activity und get_grades (Moodle). Offizielle Modulnoten, GPA und Credits stehen in Dualis: get_study_results.'
       : '- Für Termine und Abgaben nutze get_deadlines und read_activity. Auf Noten hast du keinen Zugriff; der Nutzer kann ihn unter Einstellungen → KI-Assistent freigeben.',
     '- Bei bewerteten Abgaben: erkläre, gib Hinweise und Feedback; eine fertige Lösung zum Abgeben schreibst du nicht, sondern hilfst Schritt für Schritt.',
     '- Stundenplan: get_timetable. Mensa: get_mensa_menu. Für „wann passt die Mensa?“ kombiniere beides – maßgeblich sind Abholzeit, Mindestpause und Essenszeit aus get_mensa_menu.',
@@ -301,6 +306,7 @@ class AiTools {
       case 'read_activity': { const m = this.findModule(input.module_id); return `Liest ${m ? m.mod.name : 'Aktivität'}`; }
       case 'get_deadlines': return 'Prüft anstehende Termine';
       case 'get_grades': return `Prüft Bewertungen ${k ? k.shortname || k.fullname : ''}`;
+      case 'get_study_results': return 'Schaut in die Dualis-Noten';
       case 'get_timetable': return 'Schaut in den Stundenplan';
       case 'get_mensa_menu': return `Schaut auf den Speiseplan${input && ISO_DATE.test(input.date || '') ? ` (${fmtDay(input.date)})` : ''}`;
       case 'prepare_mensa_cart': return `Legt Essen in den Warenkorb${input && ISO_DATE.test(input.date || '') ? ` (${fmtDay(input.date)})` : ''}`;
@@ -466,6 +472,22 @@ class AiTools {
         return g
           .map((it) => `- ${stripHtml(it.name)}: ${it.grade || '–'}${it.range ? ` (Bereich ${it.range})` : ''}${it.percentage && it.percentage !== '-' ? `, ${it.percentage}` : ''}${it.feedback ? ` – Feedback: ${stripHtml(it.feedback)}` : ''}`)
           .join('\n');
+      }
+
+      case 'get_study_results': {
+        if (!gradesAllowed()) throw new Error('Zugriff auf Noten ist in den Einstellungen nicht freigegeben.');
+        const st = this.dualis ? this.dualis.status() : null;
+        if (!st || !st.configured) return 'Dualis ist nicht verbunden. Der Nutzer kann sich im Reiter „Noten“ mit seinen Dualis-Zugangsdaten anmelden.';
+        const d = st.data;
+        if (!d) return st.error ? `Dualis-Noten konnten nicht geladen werden: ${st.error}` : 'Dualis-Noten werden noch geladen.';
+        const lines = [`Dualis – ${d.program || 'Leistungsübersicht'} (Stand ${new Date(st.fetchedAt).toLocaleString('de-DE')})`];
+        if (d.gpa.total || d.gpa.major) lines.push(`Gesamt-GPA: ${d.gpa.total || '–'}, Hauptfach-GPA: ${d.gpa.major || '–'} (deutsche Notenskala, 1,0 = beste)`);
+        if (d.total) lines.push(`Credits: ${d.total.credits ?? 0}${d.required ? ` von ${d.required} für den Abschluss` : ''}`);
+        for (const g of d.groups) {
+          lines.push(`\n${g.title}:`);
+          for (const m of g.modules) lines.push(`- ${m.no} ${m.name}: ${m.grade || '–'}${m.credits ? `, ${String(m.credits).replace('.', ',')} Credits` : ''} (${m.status || 'unbekannt'})`);
+        }
+        return lines.join('\n');
       }
     }
     throw new Error('Unbekanntes Werkzeug');

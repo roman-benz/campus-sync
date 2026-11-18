@@ -16,6 +16,7 @@
 - **Stundenplan:** Eigener Reiter mit Wochenansicht aus Rapla oder jedem iCal-Kalender (`https://…`, `webcal://…`). Der Rapla-Plan TSA25 der DHBW Ravensburg ist als Vorlage eingetragen; eigene Links lassen sich hinzufügen. Der Plan wird lokal gespeichert und ist offline verfügbar.
   - **Verschiebevorschläge:** Stunden mit der Maus an eine andere Stelle ziehen (auf 15 Minuten gerastert, auch an andere Tage). Der Plan selbst bleibt unverändert; verschobene Stunden erscheinen als Vorschlag, die alte Zeit bleibt gestrichelt sichtbar. „Als Vorschlag senden“ öffnet dein Mailprogramm mit einer fertigen Mail an den Kurssprecher: Empfänger, Betreff, alte und neue Zeiten und deine Bemerkung sind schon drin, du musst nur noch abschicken. Eine Übersicht als Grafik (vorher/nachher im Wochenraster) liegt zusätzlich in der Zwischenablage und lässt sich mit Strg+V in die Mail einfügen.
 - **Mensa:** Speiseplan der Mensa Fallenbrunnen (oder jeder anderen Mensa auf my-mensa.de) mit Fotos, Beschreibung, Preisen (DHBW/intern/extern), vegan/vegetarisch-Kennzeichnung und Allergenen. Der letzte Stand bleibt offline sichtbar. Bestellen direkt in der App: Gerichte in den Warenkorb, Abholzeit wählen (passende Pausen aus dem Stundenplan sind markiert), der Abholschein kommt per E-Mail.
+- **Noten aus Dualis:** Eigener Reiter mit allen Modulen, Noten, Credits und Status aus der Dualis-Leistungsübersicht, Gesamt- und Hauptfach-GPA und Fortschritt bis zum Abschluss. Aktualisiert sich alle drei Stunden im Hintergrund und meldet neue Noten als Windows-Benachrichtigung. Der Assistent kennt die Noten, wenn Noten unter **Einstellungen → KI-Assistent** freigegeben sind (nur Desktop-App).
 - **Volltextsuche:** Alle Dokumente werden seitengenau indexiert. Die Suche in der Kopfzeile (Strg+Umschalt+F) findet Stellen in allen Skripten und springt direkt zur Seite.
 - **KI-Lernassistent** (Strg+K): Durchsucht die Unterlagen, liest die passenden Seiten und erklärt sie. Fundstellen erscheinen als Links, die im Viewer an der richtigen Seite öffnen. Markierten Text im Viewer kannst du direkt „erklären“ lassen. Er kennt auch Stundenplan und Speiseplan („Wann passt morgen die Mensa?“) und legt dir Essen in den Warenkorb oder bestellt es für dich – verbindlich erst, wenn du im Bestätigungsdialog der App auf „Bestellen“ klickst.
   - **Bilder und Screenshots:** Im PDF-Viewer mit dem Ausschnitt-Werkzeug (Strg+Umschalt+S) einen Bereich aufziehen, etwa eine Formel, Skizze oder Aufgabe. Er wird unabhängig vom Zoom scharf neu gerendert und an den Chat gehängt. Ein Klick nimmt die ganze Seite. Eigene Bilder fügst du mit Strg+V ein, ziehst sie in den Chat oder wählst sie über die Büroklammer (bis zu 8 pro Nachricht). „Diese Seite erklären“ schickt die Seite automatisch als Bild mit. Beides funktioniert mit ChatGPT und Claude.
@@ -51,7 +52,8 @@ Unter **[chadoodle.romanbenz.com](https://chadoodle.romanbenz.com)** läuft dies
 
 - **Chadoodle-Konto (Supabase, Frankfurt):** Beim Anmelden prüft der Server dein Moodle-Token einmal bei deiner Moodle-Seite (nur die User-ID) und verwirft es danach. Gespeichert werden Moodle-Adresse und User-ID, abgeglichene Einstellungen, über Chadoodle aufgegebene Mensa-Bestellungen und – nur wenn eingeschaltet – der Claude-API-Key. Nicht gespeichert werden Kursdateien, Kursinhalte, Noten, das Moodle-Token und dein Name. Unter **Einstellungen → Konto** kannst du ein Gerät trennen oder das Konto samt aller Daten löschen.
 
-- Gespeichert wird nur ein Zugriffstoken, kein Kennwort, verschlüsselt mit Windows DPAPI. Das gilt ebenso für API-Key und ChatGPT-Tokens.
+- Für Moodle wird nur ein Zugriffstoken gespeichert, kein Kennwort, verschlüsselt mit Windows DPAPI. Das gilt ebenso für API-Key und ChatGPT-Tokens.
+- **Dualis** bietet keine Tokens: Benutzername und Kennwort liegen deshalb – nur wenn du Dualis verbindest – verschlüsselt (DPAPI) auf dem PC und gehen ausschließlich an dualis.dhbw.de. Sie werden nicht mit dem Chadoodle-Konto abgeglichen. „Dualis trennen“ im Reiter Noten löscht sie samt der gespeicherten Noten.
 - Kursdaten bleiben lokal. Nur Inhalte, die der KI-Assistent für eine Antwort liest, und Bilder, die du selbst anhängst, gehen an den gewählten KI-Anbieter. Namen von Forenautoren werden nie übertragen, Noten nur, wenn du das unter **Einstellungen → KI-Assistent** erlaubst. Aus dem Stundenplan gehen nur Zeit, Titel und Raum mit, keine Beschreibungen.
 - Verschiebevorschläge bleiben auf dem Gerät. Die Mail verschickst du selbst aus deinem Mailprogramm; Chadoodle sendet nichts. Nur die Adresse des Kurssprechers wird wie die anderen Einstellungen mit dem Chadoodle-Konto abgeglichen. Name und E-Mail für Mensa-Bestellungen kennt die KI nur, wenn du sie ihr im Chat nennst; der Name kommt beim Bestellen direkt aus deinem Moodle-Konto.
 - Kursunterlagen sind urheberrechtlich geschützt, und viele Hochschulen untersagen in ihren Moodle-Nutzungsbedingungen die Weitergabe von Inhalten an Dritte. Kläre vor Nutzung des KI-Assistenten, ob deine Hochschule das erlaubt.
@@ -59,14 +61,30 @@ Unter **[chadoodle.romanbenz.com](https://chadoodle.romanbenz.com)** läuft dies
 
 ## Entwicklung
 
+Die Desktop-App ist eine **Tauri-App** (Rust + WebView2). Die App-Logik in `src/main` ist dieselbe wie in der Web-Version und läuft in der WebView; Rust übernimmt alles Betriebssystemnahe (Fenster, Tray, Autostart, Dateisystem, DPAPI, Netzwerk, Benachrichtigungen, Updates). Gegenüber der früheren Electron-Version braucht sie deutlich weniger Arbeitsspeicher und Platz.
+
+Voraussetzungen: Node.js, [Rust](https://rustup.rs) (stable, MSVC) und die Tauri-CLI (`cargo install tauri-cli --version "^2"`).
+
 ```bash
 npm install
-npm start          # App starten
-npm run demo       # Demo mit Beispielkursen (ohne Moodle-Zugang)
+npm run tauri:dev  # Oberfläche bauen, Debug-App bauen und starten
+npm run tauri:dist # Installer nach src-tauri/target/release/bundle/nsis bauen
 npm test           # Tests (Verschiebevorschläge im Stundenplan)
-npm run dist       # Installer lokal nach out/ bauen
 npm run web:dev    # Web-Version bauen und unter http://localhost:8788 starten
 ```
+
+Mit `MOODLE_DESKTOP_USERDATA=<Ordner>` startet die App mit einem eigenen Profil. Debug-Builds öffnen das DevTools-Protokoll auf Port 9333; `node tauri/cdp.mjs eval "…"`, `node tauri/cdp.mjs shot bild.png` und `node tauri/cdp.mjs heap` führen darüber Code aus, machen Screenshots oder messen den JS-Speicher.
+
+Tests:
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml          # Rust (Normalisierung, Ausschnitte)
+node tauri/cdp.mjs eval @tauri/test/search-queries.js    # Suchergebnisse (Debug-App)
+node tauri/cdp.mjs eval @tauri/test/ai-tools.js          # KI-Werkzeuge ohne KI-Anbieter
+node tauri/test/sso-server.mjs & node tauri/cdp.mjs eval @tauri/test/native.js   # SSO-Fenster, Rückruf-Server
+```
+
+Die bisherige Electron-Version (`npm start`, `npm run dist`) bleibt vorerst im Repository.
 
 Die Web-Version wird bei jedem Push auf `main` automatisch von Cloudflare Pages gebaut (`npm run web:build` → `web/dist`) und unter chadoodle.romanbenz.com veröffentlicht.
 
@@ -79,13 +97,21 @@ Die Web-Version wird bei jedem Push auf `main` automatisch von Cloudflare Pages 
    git tag v1.2.0
    git push && git push --tags
    ```
-3. GitHub Actions baut den Installer und veröffentlicht das Release. Installierte Apps aktualisieren sich danach automatisch.
+3. GitHub Actions baut den Installer und veröffentlicht das Release. Installierte Apps aktualisieren sich danach automatisch – auch noch installierte Electron-Versionen: sie laden über `latest.yml` den Tauri-Installer, der die alte Installation entfernt (Anmeldung, Einstellungen und Kursdateien bleiben).
+
+Updates sind signiert. Der private Schlüssel gehört als Secret `TAURI_SIGNING_PRIVATE_KEY` ins Repository (Passwort, falls gesetzt, als `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`); der öffentliche steht in `src-tauri/tauri.conf.json`.
 
 ### Aufbau
 
 | Datei | Aufgabe |
 |---|---|
-| `src/main/main.js` | Fenster, Tray, IPC, Autostart, `mfile://`-Protokoll |
+| `src-tauri/src/main.rs` | Tauri-App: Fenster, Tray, Autostart, Benachrichtigungen, Anmelde- und Mensa-Fenster, Updates |
+| `src-tauri/src/protocol.rs` | Eigenes Protokoll: App-Dateien, synchrones Dateisystem für die JS-Module (`/cfs/`), lokale Dateien (`/vfs/`), Moodle-Medien (`/mfile/`) |
+| `src-tauri/src/net.rs` | fetch über Rust (ohne CORS, gestreamt), Downloads, lokale Rückruf-Server |
+| `src-tauri/src/textindex.rs`, `tauri/docindex.js` | Volltextindex in Rust (gleiche Suche/Bewertung und gleiches Dateiformat wie `src/main/docindex.js`; Textextraktion weiter mit pdf.js im Worker) |
+| `src-tauri/src/secrets.rs` | Verschlüsselung wie Electrons safeStorage (DPAPI + AES-GCM, gleiche `secrets.json`) |
+| `tauri/backend.js`, `tauri/shims/*`, `tauri/build.mjs` | Ersetzt `main.js`/`preload.js` in der WebView; Ersatz für `fs`, `path`, `http`, `crypto`, `electron` |
+| `src/main/main.js` | Electron-Version (bisher): Fenster, Tray, IPC, Autostart, `mfile://`-Protokoll |
 | `src/main/moodle.js` | Moodle-Webservice-Client, Passwort- und SSO-Login, Downloads |
 | `src/main/sync.js` | Hintergrund-Sync, Dateiindex, inkrementelle Downloads, Benachrichtigungen |
 | `src/main/docindex.js`, `extract.js`, `indexer-worker.js` | Seitengenauer Volltextindex in einem Hintergrundprozess |
@@ -95,7 +121,7 @@ Die Web-Version wird bei jedem Push auf `main` automatisch von Cloudflare Pages 
 | `src/main/updater.js` | Automatische Updates (electron-updater, GitHub-Releases) |
 | `src/renderer/*` | Oberfläche (Vanilla JS ohne Build-Schritt) und PDF-Viewer (`viewer.js`) |
 | `src/renderer/tt-proposal.js`, `test/` | Verschiebevorschläge im Stundenplan: Rastern beim Ziehen, Mailtext, mailto-Link, Übersicht als HTML-Tabelle; Tests mit `node --test` |
-| `build/installer.nsh` | Autostart-Eintrag bei Installation und Deinstallation |
+| `src-tauri/nsis-hooks.nsh` | Autostart-Eintrag bei Installation/Deinstallation, Entfernen einer alten Electron-Installation |
 | `web/backend.js` | Web-Version: ersetzt `main.js` und `preload.js` im Browser |
 | `web/shims/*` | Browser-Ersatz für `fs` (IndexedDB), `electron`, `crypto` und `url` |
 | `web/sw.js`, `web/indexer-worker.js` | Service Worker (Dateien, Moodle-Medien, offline) und Textextraktion im Web Worker |
@@ -103,6 +129,7 @@ Die Web-Version wird bei jedem Push auf `main` automatisch von Cloudflare Pages 
 | `functions/_middleware.js`, `functions/_auth/*` | Zugangsschutz der Website: Passkey-Sitzung prüfen, Login-, Einladungs- und Admin-Seiten |
 | `functions/api/auth`, `functions/api/admin` | Passkey-Anmeldung (WebAuthn) und Admin-API (Einladungen, Nutzer, Passkeys) |
 | `src/main/web-access.js`, `functions/app-login.js` | Passkey-Zugang der Desktop-App (Anmeldung im Browser, Rückruf an die App) |
+| `src/main/dualis.js` | Dualis: Anmeldung, Leistungsübersicht auslesen, Hintergrund-Aktualisierung, Benachrichtigung bei neuen Noten |
 | `src/main/account.js` | Chadoodle-Konto: Abgleich von Einstellungen, Mensa-Bestellungen und API-Key (Supabase, Realtime) |
 | `supabase/functions/account` | Edge Function: Moodle-Token prüfen, Konto anlegen/finden, Sitzung ausstellen, Konto löschen |
 

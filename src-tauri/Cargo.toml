@@ -1,0 +1,50 @@
+[package]
+name = "chadoodle"
+version = "2.0.0"
+description = "Chadoodle – Moodle-Kurse als Windows-App (Tauri)"
+authors = ["Roman Benz"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.80"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png", "custom-protocol"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls", "zip"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["native-tls", "stream", "gzip", "brotli", "deflate"] }
+tokio = { version = "1", features = ["sync", "time", "fs", "io-util", "rt", "macros"] }
+futures-util = "0.3"
+tokio-util = "0.7"
+base64 = "0.22"
+aes-gcm = "0.10"
+rand = "0.8"
+sha1 = "0.10"
+sha2 = "0.10"
+hex = "0.4"
+percent-encoding = "2"
+url = "2"
+tiny_http = "0.12"
+unicode-normalization = "0.1"
+ring = "0.17"
+tauri-winrt-notification = "0.7"
+winreg = "0.55"
+webview2-com = "0.39"
+windows-core = "0.62"
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_UI_Shell", "Win32_System_Memory"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
+
+[dev-dependencies]
+minisign-verify = "0.2"
