@@ -1,9 +1,8 @@
 // Chadoodle fürs iPhone: native App für die Moodle-Kurse – lokal synchronisiert, mit PDF-Viewer,
-// Volltextsuche, Stundenplan, Mensa und ChatGPT-Lernassistent. Gleicher Ablauf wie die Desktop-App:
-// erst Passkey-Zugang (chadoodle.romanbenz.com), dann Moodle-Anmeldung, danach arbeitet alles auf der lokalen Kopie.
+// Volltextsuche, Stundenplan (mit Verschiebevorschlägen), Noten aus Dualis, Mensa und ChatGPT-Lernassistent.
+// Gleicher Ablauf wie die Desktop-App: erst Passkey-Zugang (chadoodle.romanbenz.com), dann Moodle-Anmeldung,
+// danach arbeitet alles auf der lokalen Kopie. Neue Noten, Dateien und Fristen kommen als Mitteilung.
 import SwiftUI
-
-let brand = Color(red: 0.06, green: 0.42, blue: 0.75)
 
 @main
 struct ChadoodleApp: App {
@@ -20,9 +19,16 @@ struct ChadoodleApp: App {
                 .environmentObject(app.timetables)
                 .environmentObject(app.mensa)
                 .environmentObject(app.chatgpt)
+                .environmentObject(app.dualis)
+                .environmentObject(Notifier.shared)
                 .environmentObject(assistant)
                 .tint(brand)
                 .onAppear { assistant.attach(app) }
+        }
+        // Weckruf im Hintergrund: Dualis und Moodle prüfen, Neues als Mitteilung melden
+        .backgroundTask(.appRefresh(backgroundRefreshId)) {
+            Notifier.scheduleBackgroundRefresh()
+            await app.backgroundRefresh()
         }
     }
 }
@@ -45,6 +51,7 @@ struct RootView: View {
         }
         .task { await gate.restore() }
         .onChange(of: phase) { _, p in
+            if p == .background { Notifier.scheduleBackgroundRefresh() }
             guard p == .active, gate.state == .signedIn, app.signedIn else { return }
             Task {
                 await app.syncIfStale()
@@ -56,18 +63,37 @@ struct RootView: View {
 
 struct MainTabs: View {
     @EnvironmentObject private var app: AppModel
+    @EnvironmentObject private var notifier: Notifier
     @StateObject private var router = TabRouter()
 
     var body: some View {
         TabView(selection: $router.tab) {
-            HomeView().tabItem { Label("Heute", systemImage: "sun.max.fill") }.tag(TabRouter.Tab.home)
-            CoursesView().tabItem { Label("Kurse", systemImage: "books.vertical.fill") }.tag(TabRouter.Tab.courses)
+            HomeView().tabItem { Label("Übersicht", systemImage: "house.fill") }.tag(TabRouter.Tab.home)
+            CoursesView().tabItem { Label("Kurse", systemImage: "book.closed.fill") }.tag(TabRouter.Tab.courses)
             TimetableView().tabItem { Label("Stundenplan", systemImage: "calendar") }.tag(TabRouter.Tab.timetable)
+            GradesView().tabItem { Label("Noten", systemImage: "graduationcap.fill") }.tag(TabRouter.Tab.grades)
             MensaView().tabItem { Label("Mensa", systemImage: "fork.knife") }.tag(TabRouter.Tab.mensa)
-            AssistantView().tabItem { Label("Assistent", systemImage: "sparkles") }.tag(TabRouter.Tab.assistant)
         }
         .environmentObject(router)
-        .task { await app.syncIfStale() }
+        .sheet(isPresented: $router.assistant) { AssistantView() }
+        .task {
+            if notifier.authorized == nil { await notifier.requestPermission() }
+            Notifier.scheduleBackgroundRefresh()
+            await app.syncIfStale()
+        }
+        .onChange(of: notifier.openTab) { _, t in
+            if let t { router.tab = t; notifier.openTab = nil }
+        }
+    }
+}
+
+// Knopf für den Assistenten in der Navigationsleiste (öffnet ihn als Blatt)
+struct AssistantButton: View {
+    @EnvironmentObject private var router: TabRouter
+
+    var body: some View {
+        Button { router.assistant = true } label: { Image(systemName: "sparkles") }
+            .accessibilityLabel("Assistent")
     }
 }
 
@@ -86,7 +112,7 @@ struct GateLoginView: View {
                 Task { await gate.login() }
             } label: {
                 HStack {
-                    if gate.busy { ProgressView().tint(.white) }
+                    if gate.busy { ProgressView().tint(Color.onInk) }
                     Label("Mit Passkey anmelden", systemImage: "person.badge.key.fill")
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 6)
@@ -94,7 +120,7 @@ struct GateLoginView: View {
             .buttonStyle(.borderedProminent)
             .disabled(gate.busy)
             if let e = gate.error {
-                Text(e).font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center)
+                Text(e).font(.footnote).foregroundStyle(Color.ink).multilineTextAlignment(.center)
             }
             Spacer()
             Text("Noch kein Passkey? Den Einladungslink bekommst du vom Admin.")
@@ -155,7 +181,7 @@ struct MoodleLoginView: View {
                     Text("Für Hochschul-Logins wie Shibboleth oder Microsoft. Nach der Anmeldung kehrt Moodle automatisch in die App zurück.")
                 }
                 if busy { Section { HStack { ProgressView(); Text("Anmelden…") } } }
-                if let error { Section { Text(error).foregroundStyle(.red) } }
+                if let error { Section { Text(error).foregroundStyle(Color.ink) } }
                 Section {
                     Button("Chadoodle-Zugang abmelden", role: .destructive) { Task { await gate.logout() } }
                 }
@@ -195,7 +221,7 @@ struct AppLogo: View {
                 Image(uiImage: img).resizable()
             } else {
                 Image(systemName: "graduationcap.fill").resizable().scaledToFit().padding(size * 0.2)
-                    .foregroundStyle(.white).background(brand)
+                    .foregroundStyle(Color.onInk).background(Color.pDark)
             }
         }
         .frame(width: size, height: size)

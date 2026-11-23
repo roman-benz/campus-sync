@@ -25,6 +25,7 @@ final class AppModel: ObservableObject {
     let index = DocIndex()
     let timetables = Timetables()
     let mensa = MensaStore()
+    let dualis = DualisStore()
     lazy var chatgpt = ChatGPTAuth()
 
     private var client: MoodleClient?
@@ -33,6 +34,8 @@ final class AppModel: ObservableObject {
 
     init() {
         if let a = Keychain.getJSON("moodleAccount", as: MoodleAccount.self) { attach(a) }
+        dualis.onNewGrades = { Notifier.shared.newGrades($0) }
+        dualis.onAuthFailed = { Notifier.shared.dualisAuthFailed() }
     }
 
     var signedIn: Bool { account != nil }
@@ -74,10 +77,18 @@ final class AppModel: ObservableObject {
     func syncIfStale() async {
         if Date().timeIntervalSince1970 * 1000 - cache.lastSync > 10 * 60 * 1000 { await sync() }
         await timetables.refreshIfStale()
+        await dualis.refreshIfStale()
+    }
+
+    // Weckruf im Hintergrund (wenige Sekunden Rechenzeit): Noten und Moodle prüfen, keine Downloads
+    func backgroundRefresh() async {
+        await dualis.refresh()
+        if signedIn { await sync(downloads: false) }
+        await Notifier.shared.scheduleDeadlines(cache.events)
     }
 
     // ---------- Synchronisation ----------
-    func sync() async {
+    func sync(downloads: Bool = true) async {
         guard var c = client, !running else { return }
         running = true
         defer { running = false }
@@ -197,8 +208,10 @@ final class AppModel: ObservableObject {
             next.lastSync = Date().timeIntervalSince1970 * 1000
             cache = next
             save()
+            Notifier.shared.newFiles(newFiles, courses: next.courses)
+            await Notifier.shared.scheduleDeadlines(next.events)
 
-            await downloadPending()
+            if downloads { await downloadPending() }
             status = SyncStatus(state: .idle, message: "Synchronisiert")
             index.indexPending(cache.files)
         } catch {

@@ -47,14 +47,14 @@ struct AssistantView: View {
                 }
             } label: {
                 HStack {
-                    if chatgpt.busy { ProgressView().tint(.white) }
+                    if chatgpt.busy { ProgressView().tint(Color.onInk) }
                     Text("Mit ChatGPT verbinden")
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 6)
             }
             .buttonStyle(.borderedProminent)
             .disabled(chatgpt.busy)
-            if let error { Text(error).font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center) }
+            if let error { Text(error).font(.footnote).foregroundStyle(Color.ink).multilineTextAlignment(.center) }
             Spacer()
             Text("Nur Inhalte, die der Assistent für eine Antwort liest, gehen an OpenAI. Namen aus Foren und Noten nie. Kläre, ob deine Hochschule die Weitergabe von Kursunterlagen erlaubt.")
                 .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
@@ -138,7 +138,7 @@ struct MessageView: View {
                 Spacer(minLength: 40)
                 Text(message.text).padding(.horizontal, 14).padding(.vertical, 10)
                     .background(brand, in: RoundedRectangle(cornerRadius: 18))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.onInk)
                     .textSelection(.enabled)
             }
         } else {
@@ -153,7 +153,7 @@ struct MessageView: View {
                 }
                 if !message.text.isEmpty { MarkdownText(message.text) }
                 if busy && message.text.isEmpty { ProgressView().padding(.vertical, 4) }
-                if let e = message.error { Label(e, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(.orange) }
+                if let e = message.error { Label(e, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(Color.ink) }
             }
         }
     }

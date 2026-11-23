@@ -121,12 +121,9 @@ const modInfo = (m) => {
 };
 const actIcon = (m, size = '') => { const i = modInfo(m); return `<div class="act-icon ${size} p-${i.purpose}">${icon(i.icon)}</div>`; };
 
-// Erkennungsfarbe pro Kurs: grüne, violette und gelbgrüne Töne – kein Rot/Orange (Akzent, Warnung) und kein Blau
-const COURSE_HUES = [150, 168, 95, 275, 305, 128, 185, 60];
-const courseHue = (k) => COURSE_HUES[(k ? k.id : 1) % COURSE_HUES.length];
 function courseBg(k) {
   if (k && k.image) return `background-image:url("${k.image.replace(/"/g, '%22')}")`;
-  return `--course-h:${courseHue(k)}`;
+  return '';
 }
 // Platzhalter ohne Kursbild: zarte Fläche in der Kursfarbe mit Kurzname
 const courseMono = (k) => (k && k.image ? '' : `<span class="mono">${esc(String((k && (k.shortname || k.fullname)) || '?').split(/[\s_]+/)[0].slice(0, 7))}</span>`);
@@ -239,12 +236,16 @@ async function boot() {
     toast(`Bestellt · Nr. ${r.no} · Abholung ${r.time} Uhr`);
     if (S.route.name === 'mensa') loadMensaOpt(true);
   });
-  api.onTimetables(() => { if (S.route.name === 'timetable') loadTimetable(true); });
+  api.onTimetables(() => loadTimetable(true));
   setInterval(() => {
     placeNowLine();
     // Neue Woche angebrochen: Termine der aktuellen Woche neu laden, sonst nur die Anzeige auffrischen
-    if (S.route.name === 'timetable' && S.tt.nowKey && S.tt.nowKey !== `${S.tt.active}|${ttMonday(new Date())}`) loadTimetable();
-    else updateTtProgress();
+    if (S.tt.nowKey && S.tt.nowKey !== `${S.tt.active}|${ttMonday(new Date())}`) loadTimetable();
+    else {
+      updateTtProgress();
+      renderNowCard();
+      updateDashNow();
+    }
   }, 30 * 1000);
   api.onAuthExpired(() => toast('Moodle-Sitzung abgelaufen – bitte neu anmelden.', true));
   // Chadoodle-Konto: Status und Änderungen von anderen Geräten
@@ -286,11 +287,16 @@ function render() {
     return;
   }
   app.innerHTML = `
-    <header class="navbar" id="nav"></header>
-    <div class="shell">
-      <aside class="drawer-left" id="left"></aside>
-      <main class="main" id="main"></main>
-      <aside class="claude-panel closed" id="claude"></aside>
+    <div class="app-shell">
+      <aside class="sidebar" id="side"></aside>
+      <div class="workspace">
+        <header class="topbar" id="nav"></header>
+        <div class="shell">
+          <aside class="drawer-left" id="left"></aside>
+          <main class="main" id="main"></main>
+          <aside class="claude-panel closed" id="claude"></aside>
+        </div>
+      </div>
     </div>
     <div id="update-banner"></div>`;
   renderNav();
@@ -436,6 +442,23 @@ const submits = {
       loadMensa();
     }
   },
+  // Detailfenster: Stunde auf Datum und Uhrzeit legen (jede Woche, auch außerhalb des üblichen Rasters)
+  'tt-move-to'(form) {
+    const e = S.tt.evById && S.tt.evById.get(form.dataset.id);
+    const date = $('#ttm-date').value;
+    const time = $('#ttm-time').value;
+    if (!e || !date || !time) return;
+    const [y, mo, d] = date.split('-').map(Number);
+    const [h, mi] = time.split(':').map(Number);
+    const start = new Date(y, mo - 1, d, h, Math.round(mi / 15) * 15).getTime();
+    if (start < Date.now()) return toast('Der neue Termin liegt in der Vergangenheit', true);
+    ttSetMove(e, start, start + (e.end - e.start));
+    closeModal();
+    S.tt.week = ttMonday(start);
+    S.tt.scrollKey = null;
+    loadTimetable();
+    toast(start === e.start ? 'Verschiebung zurückgenommen' : `Verschoben auf ${TTP.span(start, start + (e.end - e.start))}`);
+  },
   async 'tt-add'() {
     const f = S.tt.form;
     if (!f.url.trim()) return toast('Bitte einen Link eingeben.', true);
@@ -505,32 +528,102 @@ const submits = {
 
 const cleanErr = (e) => String(e && e.message ? e.message : e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 
-// ---------- Navbar ----------
+// ---------- Seitenleiste + Kopfzeile ----------
+// Links die Bereiche als Liste mit Symbolen und unten eine Karte mit der laufenden Vorlesung,
+// oben eine schlanke Kopfzeile mit Suche, Sync-Status, Mitteilungen, Assistent und Profil.
+const NAV_ITEMS = [
+  ['dashboard', 'Übersicht', 'home', ['dashboard']],
+  ['courses', 'Kurse', 'book', ['courses', 'course', 'module']],
+  ['timetable', 'Stundenplan', 'calendar', ['timetable']],
+  ['events', 'Fristen', 'clock', ['events']],
+  ['grades', 'Noten', 'award', ['grades']],
+  ['mensa', 'Mensa', 'utensils', ['mensa']],
+];
+
+function renderSidebar() {
+  const side = $('#side');
+  if (!side || !S.data) return;
+  const r = S.route.name;
+  const soon = (S.data.events || []).filter((e) => e.timesort > Date.now() / 1000 && e.timesort <= Date.now() / 1000 + 2 * 86400).length;
+  const items = NAV_ITEMS.filter(([id]) => id !== 'grades' || api.dualisStatus).map(([id, label, ic, routes]) => {
+    const badge = id === 'events' && soon ? `<span class="side-badge" title="${soon} in den nächsten 2 Tagen fällig">${soon}</span>` : '';
+    return `<a href="#" class="side-item${routes.includes(r) ? ' active' : ''}" data-action="go" data-route="${id}" title="${label}">${icon(ic)}<span>${label}</span>${badge}</a>`;
+  });
+  side.innerHTML = `
+    <div class="side-brand" data-action="go" data-route="dashboard"><div class="brand-mark">${icon('graduation')}</div><b>Chadoodle</b></div>
+    <nav class="side-nav">${items.join('')}${navDocsHtml()}</nav>
+    <div class="side-spacer"></div>
+    <div id="now-card"></div>
+    <a href="#" class="side-item${r === 'settings' ? ' active' : ''}" data-action="go" data-route="settings" title="Einstellungen">${icon('settings')}<span>Einstellungen</span></a>`;
+  renderNowCard();
+}
+
+// Laufende bzw. nächste Vorlesung (heute) samt passendem Moodle-Kurs
+function nowLecture() {
+  const events = S.tt.nowEvents || [];
+  const now = Date.now();
+  const tomorrow = ttAddDays(new Date().setHours(0, 0, 0, 0), 1);
+  const { running, next } = INS.lectureNow(events.filter((e) => e.start < tomorrow), now);
+  return {
+    running,
+    next,
+    runningCourse: running ? INS.courseFor(running.title, courses()) : null,
+    nextCourse: next ? INS.courseFor(next.title, courses()) : null,
+  };
+}
+
+// Karte unten in der Seitenleiste: immer sichtbar, welche Vorlesung gerade läuft
+function renderNowCard() {
+  const el = $('#now-card');
+  if (!el) return;
+  if (!S.tt.list) {
+    if (!S.tt.loading) loadTimetable();
+    el.innerHTML = '';
+    return;
+  }
+  if (!S.tt.active) { el.innerHTML = ''; return; }
+  const n = nowLecture();
+  const e = n.running || n.next;
+  if (!e) {
+    el.innerHTML = `<button class="now-card idle" data-action="go" data-route="timetable" title="Stundenplan öffnen">
+      <span class="now-art">${icon('checkcircle')}</span><span class="now-label">Stundenplan</span><b class="now-title">Heute keine Vorlesung mehr</b></button>
+      <button class="now-mini" data-action="go" data-route="timetable" title="Heute keine Vorlesung mehr">${icon('checkcircle')}</button>`;
+    return;
+  }
+  const k = n.running ? n.runningCourse : n.nextCourse;
+  const pct = n.running ? Math.min(100, Math.floor(((Date.now() - e.start) / (e.end - e.start)) * 100)) : null;
+  const room = (e.location || '').split(/\s+/)[0];
+  const sub = n.running ? `noch ${ttMins(e.end - Date.now())}${room ? ` · ${room}` : ''}` : `${ttClock(e.start)} Uhr${room ? ` · ${room}` : ''}`;
+  const tip = `${n.running ? 'Jetzt' : 'Als Nächstes'}: ${e.title}${k ? `\nKurs: ${k.fullname}` : ''}\n${k ? 'Klicken öffnet den Kurs' : 'Klicken öffnet den Stundenplan'}`;
+  el.innerHTML = `<button class="now-card${n.running ? ' live' : ''}" data-action="now-open" data-course="${k ? k.id : ''}" title="${esc(tip)}">
+    <span class="now-art">${icon(n.running ? 'book' : 'clock')}</span>
+    <span class="now-label">${n.running ? '<i class="now-dot"></i>Jetzt im Unterricht' : 'Als Nächstes'}</span>
+    <b class="now-title">${esc(INS.cleanTitle(e.title))}</b>
+    <span class="now-sub">${esc(sub)}</span>
+    ${pct != null ? `<span class="progress"><i style="width:${pct}%"></i></span>` : ''}
+    <span class="now-course">${k ? `${icon('book', 'sm')}<span>Zum Kurs</span>` : `${icon('calendar', 'sm')}<span>Stundenplan</span>`}</span>
+  </button>
+  <button class="now-mini${n.running ? ' live' : ''}" data-action="now-open" data-course="${k ? k.id : ''}" title="${esc(tip)}">${n.running && pct != null ? `<b>${pct}%</b>` : icon('clock')}</button>`;
+}
+
 function renderNav() {
+  renderSidebar();
   const nav = $('#nav');
   if (!nav || !S.data) return;
   const site = S.data.site || {};
   const r = S.route.name;
-  const unread = (S.data.notifications || []).filter((n) => !n.read).length;
+  const unread = (S.data.notifications || []).filter((n) => !n.read).length + (S.data.newItems || []).filter((x) => x.type === 'file' && S.data.files[x.fileId]).length;
   nav.innerHTML = `
-    <div class="brand" data-action="go" data-route="dashboard">
-      <div class="brand-mark">${icon('graduation')}</div><b>Chadoodle</b>
-    </div>
-    <nav class="primary-nav">
-      <a href="#" data-action="go" data-route="dashboard" class="${r === 'dashboard' ? 'active' : ''}">Übersicht</a>
-      <a href="#" data-action="go" data-route="courses" class="${['courses', 'course', 'module'].includes(r) ? 'active' : ''}">Kurse</a>
-      <a href="#" data-action="go" data-route="events" class="${r === 'events' ? 'active' : ''}">Fristen</a>
-      <a href="#" data-action="go" data-route="timetable" class="${r === 'timetable' ? 'active' : ''}">Stundenplan</a>
-      <a href="#" data-action="go" data-route="mensa" class="${r === 'mensa' ? 'active' : ''}">Mensa</a>
-      ${api.dualisStatus ? `<a href="#" data-action="go" data-route="grades" class="${r === 'grades' ? 'active' : ''}">Noten</a>` : ''}
-      ${navDocsHtml()}
-    </nav>
-    <form class="nav-search" data-submit="nav-search"><div class="input-icon">${icon('search', 'sm')}<input id="nav-q" class="input" placeholder="In Dokumenten suchen…" title="Strg+Umschalt+F" value="${esc(r === 'search' ? S.route.params.q || '' : '')}" /></div></form>
+    <form class="nav-search" data-submit="nav-search"><button class="search-btn" title="Suchen">${icon('search', 'sm')}</button><input id="nav-q" class="input" placeholder="In allen Dokumenten suchen…" title="Strg+Umschalt+F" value="${esc(r === 'search' ? S.route.params.q || '' : '')}" /></form>
     <div class="spacer"></div>
+    <span class="top-date">${new Date().toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' })}, ${new Date().toLocaleDateString('de-DE', { weekday: 'long' })}</span>
     <div id="sync-pill-wrap"></div>
-    <button class="icon-btn" data-action="dropdown" data-dd="notif" title="Mitteilungen">${icon('bell')}${unread ? `<span class="badge-dot">${unread > 99 ? '99+' : unread}</span>` : ''}</button>
+    <button class="icon-btn round" data-action="dropdown" data-dd="notif" title="Mitteilungen">${icon('bell')}${unread ? `<span class="badge-dot">${unread > 99 ? '99+' : unread}</span>` : ''}</button>
     <button class="claude-toggle ${S.ui.claudeOpen ? 'active' : ''}" data-action="toggle-claude" title="Assistent (Strg+K)" aria-label="Assistent">${icon('sparkles')}<span>Assistent</span></button>
-    <button class="avatar" data-action="dropdown" data-dd="user" title="${esc(site.fullname)}">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</button>
+    <button class="user-chip" data-action="dropdown" data-dd="user" title="${esc(site.fullname)}">
+      <span class="avatar">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : initials(site.fullname)}</span>
+      <span class="user-name"><b>${esc(site.firstname || site.fullname || '')}</b><small>${esc(site.sitename || '')}</small></span>
+    </button>
     ${S.ui.dropdown ? renderDropdown() : ''}`;
   renderSyncPill();
 }
@@ -542,12 +635,12 @@ function navDocsHtml() {
   const cur = activeDoc(D.panes[D.focus]);
   const f = cur && S.data.files[cur.fileId];
   const tip = `Geöffnete Dokumente${f ? ` – zuletzt: ${docTitle(f)}` : ''}`;
-  return `<a href="#" id="nav-docs" data-action="go-docs" class="${S.route.name === 'viewer' ? 'active' : ''}" title="${esc(tip)}">Dokumente${n > 1 ? `<span class="nav-count">${n}</span>` : ''}</a>`;
+  return `<a href="#" id="nav-docs" class="side-item${S.route.name === 'viewer' ? ' active' : ''}" data-action="go-docs" title="${esc(tip)}">${icon('filetext')}<span>Dokumente</span>${n > 1 ? `<span class="side-badge quiet">${n}</span>` : ''}</a>`;
 }
 
-// Nur den Eintrag „Dokumente“ aktualisieren (Tabs ändern sich, ohne dass die Navbar neu entsteht)
+// Nur den Eintrag „Dokumente“ aktualisieren (Tabs ändern sich, ohne dass die Navigation neu entsteht)
 function renderNavDocs() {
-  const nav = $('#nav .primary-nav');
+  const nav = $('#side .side-nav');
   if (!nav) return;
   const old = $('#nav-docs');
   if (old) old.remove();
@@ -736,50 +829,201 @@ function timelineHtml(events, { showCourse = true, emptyText = 'Keine anstehende
     }).join('')}</div>`).join('');
 }
 
+// Begrüßung mit der laufenden bzw. nächsten Vorlesung; wird alle 30 s aufgefrischt (updateDashNow)
+function dashNowHtml() {
+  if (!S.tt.list) return '';
+  const n = nowLecture();
+  const e = n.running || n.next;
+  if (!e) return '';
+  const k = n.running ? n.runningCourse : n.nextCourse;
+  const room = (e.location || '').split(/\s+/)[0];
+  const pct = n.running ? Math.min(100, Math.floor(((Date.now() - e.start) / (e.end - e.start)) * 100)) : null;
+  return `<div class="hero-now${n.running ? ' live' : ''}">
+    <div class="hero-now-txt">
+      <span class="hero-now-label">${n.running ? '<i class="now-dot"></i>Jetzt im Unterricht' : `Als Nächstes · ${ttClock(e.start)} Uhr`}</span>
+      <b>${esc(INS.cleanTitle(e.title))}</b>
+      <small>${esc([`${ttClock(e.start)}–${ttClock(e.end)}`, room, n.running ? `noch ${ttMins(e.end - Date.now())}` : `in ${ttMins(e.start - Date.now())}`].filter(Boolean).join(' · '))}</small>
+      ${pct != null ? `<span class="progress"><i style="width:${pct}%"></i></span>` : ''}
+    </div>
+    ${k ? `<button class="btn hero-btn" data-action="course" data-id="${k.id}">Zum Kurs</button>` : `<button class="btn hero-btn" data-action="go" data-route="timetable">Stundenplan</button>`}
+  </div>`;
+}
+function updateDashNow() {
+  const el = $('#dash-now');
+  if (el) el.innerHTML = dashNowHtml();
+  const sch = $('#dash-today');
+  if (sch) sch.innerHTML = todayScheduleHtml();
+}
+
+// Heutige Vorlesungen als Erinnerungsliste (rechte Spalte)
+function todayScheduleHtml() {
+  if (!S.tt.list) return `<div class="empty small">${icon('refresh', 'spin')}</div>`;
+  if (!S.tt.active) return `<div class="empty small">${icon('calendar')}<div>Noch kein Stundenplan</div><button class="btn sm" style="margin-top:10px" data-action="go" data-route="timetable">Hinzufügen</button></div>`;
+  const today = new Date().setHours(0, 0, 0, 0);
+  const tomorrow = ttAddDays(today, 1);
+  const list = (S.tt.nowEvents || []).filter((e) => !e.allDay && e.start >= today && e.start < tomorrow).sort((a, b) => a.start - b.start);
+  if (!list.length) return `<div class="empty small">${icon('checkcircle')}<div>Heute keine Vorlesungen</div></div>`;
+  const now = Date.now();
+  return list.map((e) => {
+    const k = INS.courseFor(e.title, courses());
+    const state = e.end <= now ? 'done' : e.start <= now ? 'live' : '';
+    const room = (e.location || '').split(/\s+/)[0];
+    return `<button class="remind ${state}" ${k ? `data-action="course" data-id="${k.id}"` : 'data-action="go" data-route="timetable"'} title="${esc(e.title)}${k ? `\nKurs: ${esc(k.fullname)}` : ''}">
+      <span class="remind-ic">${icon(state === 'done' ? 'check' : state === 'live' ? 'bell' : 'clock')}</span>
+      <span class="remind-txt"><b>${esc(INS.cleanTitle(e.title))}</b><small>${ttClock(e.start)}–${ttClock(e.end)}${room ? ` · ${esc(room)}` : ''}${state === 'live' ? ' · jetzt' : ''}</small></span>
+    </button>`;
+  }).join('');
+}
+
+// Monatskalender: Tage mit Vorlesung hinterlegt, Fristen als Punkt, heute dunkel; Klick öffnet die Woche
+function miniCalHtml() {
+  const first = new Date(S.ui.calMonth || new Date().setDate(1));
+  first.setHours(0, 0, 0, 0);
+  first.setDate(1);
+  const mo = first.getMonth();
+  const start = new Date(first);
+  start.setDate(1 - ((first.getDay() + 6) % 7));
+  const today = new Date().setHours(0, 0, 0, 0);
+  const due = new Map();
+  for (const e of S.data.events || []) {
+    const d = new Date(e.timesort * 1000).setHours(0, 0, 0, 0);
+    due.set(d, (due.get(d) || 0) + 1);
+  }
+  const lectures = new Set((S.tt.nowEvents || []).filter((e) => !e.allDay).map((e) => new Date(e.start).setHours(0, 0, 0, 0)));
+  const cells = [];
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    const ms = d.getTime();
+    if (i >= 35 && d.getMonth() !== mo) break;
+    const n = due.get(ms);
+    const cls = [d.getMonth() !== mo ? 'out' : '', ms === today ? 'today' : '', n ? 'due' : '', lectures.has(ms) ? 'lec' : ''].filter(Boolean).join(' ');
+    const tip = [d.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' }), n ? `${n} ${n === 1 ? 'Frist' : 'Fristen'}` : ''].filter(Boolean).join(' · ');
+    cells.push(`<button class="mc-day ${cls}" data-action="cal-day" data-day="${ms}" title="${esc(tip)}">${d.getDate()}</button>`);
+  }
+  return `<div class="mc-head"><button class="mc-nav" data-action="cal-month" data-d="-1" title="Voriger Monat">${icon('chevleft', 'sm')}</button>
+      <b>${first.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' })}</b>
+      <button class="mc-nav" data-action="cal-month" data-d="1" title="Nächster Monat">${icon('chevright', 'sm')}</button></div>
+    <div class="mc-grid">${['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map((w) => `<span class="mc-wd">${w}</span>`).join('')}${cells.join('')}</div>`;
+}
+
+// Kurs als einfarbige Karte (drei Abstufungen der Palette) wie „Classes“
+function courseTile(k, i, badge = null) {
+  const files = Object.values(S.data.files).filter((f) => f.courseId === k.id).length;
+  const who = coursePersons(k);
+  return `<button class="class-card shade-${i % 3}${badge ? ` now-${badge.cls}` : ''}" data-action="course" data-id="${k.id}" title="${esc(k.fullname)}">
+    ${badge ? `<span class="now-badge ${badge.cls}">${badge.cls === 'live' ? '<i class="now-dot"></i>' : icon('clock', 'sm')}${esc(badge.text)}</span>` : ''}
+    <span class="cc-cat">${esc(k.categoryname || k.shortname || '')}</span>
+    <b class="cc-title">${esc(k.fullname)}</b>
+    <span class="cc-meta">${icon('folder', 'sm')} ${files} ${files === 1 ? 'Datei' : 'Dateien'}${k.isfavourite ? ` · ${icon('star', 'sm')}` : ''}</span>
+    <span class="cc-meta">${who ? `${icon('user', 'sm')} ${esc(who)}` : k.progress != null ? `${icon('checkcircle', 'sm')} ${Math.round(k.progress)} % erledigt` : `${icon('book', 'sm')} ${esc(k.shortname || '')}`}</span>
+  </button>`;
+}
+
+// Dozent eines Kurses aus dem Stundenplan (erste passende Vorlesung dieser Woche)
+function coursePersons(k) {
+  const ev = (S.tt.nowEvents || []).find((e) => e.persons && e.persons.length && INS.courseFor(e.title, courses()) === k);
+  return ev ? ev.persons.join(', ') : '';
+}
+
 function renderDashboard() {
   const d = S.data;
   const now = Date.now() / 1000;
-  const range = S.ui.tlRange;
-  const events = d.events.filter((e) => range === 'all' || e.timesort <= now + Number(range) * 86400);
   const soon = d.events.filter((e) => e.timesort <= now + 2 * 86400).length;
   const week = d.events.filter((e) => e.timesort > now && e.timesort <= now + 7 * 86400).length;
-  const recent = [...d.courses].sort((a, b) => (b.lastaccess || 0) - (a.lastaccess || 0)).slice(0, 4);
-  const news = (d.newItems || []).filter((x) => x.type === 'file' && d.files[x.fileId]).slice(0, 8);
+  const recent = [...d.courses].sort((a, b) => (b.lastaccess || 0) - (a.lastaccess || 0)).slice(0, 3);
+  const news = (d.newItems || []).filter((x) => x.type === 'file' && d.files[x.fileId]).slice(0, 5);
   const hour = new Date().getHours();
-  const greet = hour < 11 ? 'Guten Morgen' : hour < 18 ? 'Hallo' : 'Guten Abend';
+  const greet = hour < 11 ? 'Guten Morgen' : hour < 18 ? 'Willkommen zurück' : 'Guten Abend';
+  if (!S.tt.list) loadTimetable();
+  if (api.dualisStatus && !S.dualis.st && !S.dualis.loading) {
+    S.dualis.loading = true;
+    loadDualis().finally(() => (S.dualis.loading = false));
+  }
+  const gd = S.dualis.st && S.dualis.st.data;
+  const gx = gd ? INS.gpaExact(gd) : null;
+  const gpa = gd ? (gx.total != null ? INS.fmtGrade(gx.total) : gd.gpa.total) : null;
+  const wk = S.tt.nowEvents ? ttDone(S.tt.nowEvents, ttMonday(new Date()), ttAddDays(ttMonday(new Date()), 7), Date.now()) : null;
 
-  return `<div class="page wide">
-    <section class="hero">
-      <h1>${greet}, ${esc(d.site.firstname || d.site.fullname)}</h1>
-      <p>${new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })} · ${esc(dashSummary(soon, week, news.length))}</p>
-    </section>
-    <div class="grid-dash">
-      <div class="stack">
-        <div class="card">
-          <div class="card-head"><h2>Als Nächstes</h2>
-            <div class="segmented">${[['7', '7 Tage'], ['30', '30 Tage'], ['all', 'Alle']].map(([v, l]) => `<button class="${range === v ? 'on' : ''}" data-action="tl-range" data-v="${v}">${l}</button>`).join('')}</div>
-          </div>
-          <div class="card-body">${timelineHtml(events, { emptyText: 'Nichts fällig – genieß die freie Zeit.' })}</div>
+  // Fristen als Tabelle (wie „Lessons“)
+  const rows = d.events.slice(0, 6).map((e) => {
+    const m = e.cmid ? findModule(e.cmid) : null;
+    const k = courseById(e.courseid);
+    const due = dueIn(e.timesort);
+    const urgent = due.cls === 'danger';
+    return `<tr ${m ? `data-action="module" data-cmid="${e.cmid}"` : e.url ? `data-action="external" data-url="${esc(e.url)}"` : ''}>
+      <td><b>${esc(e.activityname || e.name)}</b></td>
+      <td class="muted">${esc(k ? k.shortname || k.fullname : e.coursename || '')}</td>
+      <td class="nowrap">${fmtDate(e.timesort, { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
+      <td class="muted">${esc(modInfo(m ? m.mod : { modname: e.modulename }).label)}</td>
+      <td class="nowrap"><span class="status ${urgent ? 'urgent' : ''}"><i></i>${esc(urgent ? due.text : 'Offen')}</span></td>
+    </tr>`;
+  }).join('');
+
+  const head = (title, route, label = 'Alle ansehen') => `<div class="sec-head"><h2>${title}</h2>${route ? `<button class="view-all" data-action="go" data-route="${route}">${label} ${icon('chevright', 'sm')}</button>` : ''}</div>`;
+  const site = d.site || {};
+
+  return `<div class="page wide dash">
+    <div class="dash-main">
+      <section class="hero-banner">
+        <div class="hero-copy">
+          <h1>${greet}, ${esc(site.firstname || site.fullname)}!</h1>
+          <p class="hero-sum">${esc(dashSummary(soon, week, news.length))}.</p>
+          <div id="dash-now">${dashNowHtml()}</div>
         </div>
-        <div class="card">
-          <div class="card-head"><h2>Zuletzt geöffnet</h2><button class="btn ghost sm" data-action="go" data-route="courses">Alle Kurse ${icon('chevright', 'sm')}</button></div>
-          <div class="card-body"><div class="course-grid recent">${recent.map(courseCard).join('') || '<div class="empty">Keine Kurse</div>'}</div></div>
-        </div>
-      </div>
-      <div class="stack">
-        <div class="card">
-          <div class="card-head"><h2>Neue Dateien</h2>${news.length ? '<button class="btn ghost sm" data-action="clear-news">Alle gesehen</button>' : ''}</div>
-          <div class="card-body">${news.length ? news.map((x) => { const f = d.files[x.fileId]; const k = courseById(f.courseId); return fileLine(f, k ? k.shortname || k.fullname : ''); }).join('') : `<div class="empty">${icon('checkcircle')}<div>Nichts Neues – alles gesehen.</div></div>`}</div>
-        </div>
-        ${S.ui.claudeOpen ? '' : `<div class="card ask-card">
-          <div class="card-head"><h2>${icon('sparkles')} Assistent fragen</h2></div>
-          <div class="card-body"><div class="suggestions">
-            ${['Was muss ich diese Woche erledigen?', 'Worum geht es in den neuen Dateien?', 'Erstelle mir einen Lernplan für die nächsten 2 Wochen.'].map((q) => `<div class="suggestion" data-action="ask" data-q="${esc(q)}">${esc(q)}</div>`).join('')}
-          </div></div>
-        </div>`}
-      </div>
+        ${heroArt()}
+      </section>
+      <section>${head('Deine Kurse', 'courses')}
+        <div class="class-grid">${recent.map((k, i) => courseTile(k, i)).join('') || '<div class="card empty">Keine Kurse</div>'}</div>
+      </section>
+      <section>${head('Fristen', 'events')}
+        <div class="card table-card">${rows ? `<table class="table dash-table"><thead><tr><th>Aufgabe</th><th>Kurs</th><th>Fällig</th><th>Art</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty">${icon('checkcircle')}<div>Nichts fällig – genieß die freie Zeit.</div></div>`}</div>
+      </section>
+      ${news.length ? `<section>${head('Neue Dateien', null)}
+        <div class="card table-card"><div class="card-body files-body">${news.map((x) => { const f = d.files[x.fileId]; const k = courseById(f.courseId); return fileLine(f, k ? k.shortname || k.fullname : ''); }).join('')}
+        <button class="btn sm ghost" data-action="clear-news" style="margin-top:6px">Alle als gesehen markieren</button></div></div>
+      </section>` : ''}
     </div>
+    <aside class="dash-side">
+      <div class="profile">
+        <div class="profile-pic">${site.avatar ? `<img src="${esc(site.avatar)}" alt="" />` : `<span>${initials(site.fullname)}</span>`}</div>
+        <b>${esc(site.fullname || '')}</b>
+        <small>Student · ${esc(site.sitename || '')}</small>
+        <button class="btn sm profile-btn" data-action="go" data-route="settings">Profil</button>
+        <div class="profile-stats">
+          <div><b>${gpa ? esc(gpa) : d.courses.length}</b><small>${gpa ? 'Notenschnitt' : 'Kurse'}</small></div>
+          <div><b>${week}</b><small>Fristen (7 T.)</small></div>
+          <div><b>${wk && wk.pct != null ? `${wk.pct}%` : '–'}</b><small>Woche</small></div>
+        </div>
+      </div>
+      <div class="mini-cal" id="mini-cal">${miniCalHtml()}</div>
+      <div class="reminders">
+        <div class="sec-head"><h2>Heute</h2><button class="view-all" data-action="go" data-route="timetable">Woche ${icon('chevright', 'sm')}</button></div>
+        <div id="dash-today">${todayScheduleHtml()}</div>
+      </div>
+    </aside>
   </div>`;
+}
+
+// Dekorative Illustration im Banner: isometrischer Bücherstapel in den drei Farben (rein grafisch)
+function heroArt() {
+  const book = (y, top, side, front) => `<g transform="translate(0 ${y})">
+      <path d="M40 60 140 20 240 60 140 100z" fill="${top}"/>
+      <path d="M40 60v22l100 40V100z" fill="${front}"/>
+      <path d="M140 100v22l100-40V60z" fill="${side}"/>
+      <path d="M52 66 140 101 228 66" stroke="#f2f4f7" stroke-width="3" fill="none" opacity=".9"/>
+    </g>`;
+  return `<svg class="hero-art" viewBox="0 0 280 220" aria-hidden="true">
+    ${book(98, '#0e7c86', '#0b6870', '#095a61')}
+    ${book(58, '#f2f4f7', '#cfd5de', '#b8c0cc')}
+    ${book(18, '#1b1f27', '#14171d', '#0f1116')}
+    <g transform="translate(96 -8) skewY(-22) skewX(28)" opacity=".95">
+      <rect x="20" y="40" width="96" height="62" rx="6" fill="#f2f4f7"/>
+      <rect x="32" y="52" width="16" height="10" rx="2" fill="#0e7c86"/><rect x="54" y="54" width="50" height="5" rx="2.5" fill="#56637a"/>
+      <rect x="32" y="68" width="16" height="10" rx="2" fill="#56637a"/><rect x="54" y="70" width="44" height="5" rx="2.5" fill="#56637a"/>
+      <rect x="32" y="84" width="16" height="10" rx="2" fill="#1b1f27"/><rect x="54" y="86" width="36" height="5" rx="2.5" fill="#56637a"/>
+    </g>
+  </svg>`;
 }
 
 function fileLine(f, sub = '') {
@@ -794,8 +1038,9 @@ function fileLine(f, sub = '') {
 }
 
 function courseCard(k) {
-  return `<div class="course-card" data-action="course" data-id="${k.id}">
-    <div class="course-img ${k.image ? '' : 'ph'}" style='${courseBg(k)}'>${courseMono(k)}${k.isfavourite ? `<span class="fav">${icon('star', 'sm')}</span>` : ''}</div>
+  const b = S.route.name === 'courses' && S.ui.courseBadges && S.ui.courseBadges.get(k.id);
+  return `<div class="course-card${b ? ` now-${b.cls}` : ''}" data-action="course" data-id="${k.id}">
+    <div class="course-img ${k.image ? '' : 'ph'}" style='${courseBg(k)}'>${courseMono(k)}${k.isfavourite ? `<span class="fav">${icon('star', 'sm')}</span>` : ''}${b ? `<span class="now-badge ${b.cls}">${b.cls === 'live' ? '<i class="now-dot"></i>' : icon('clock', 'sm')}${esc(b.text)}</span>` : ''}</div>
     <div class="course-info">
       <div class="cat">${esc(k.categoryname || k.shortname)}</div>
       <h3>${esc(k.fullname)}</h3>
@@ -819,6 +1064,19 @@ function renderCourses() {
     return true;
   });
   list.sort(S.ui.courseSort === 'name' ? (a, b) => a.fullname.localeCompare(b.fullname, 'de') : (a, b) => (b.lastaccess || 0) - (a.lastaccess || 0));
+  // Kurs der laufenden (danach der nächsten) Vorlesung steht oben
+  if (!S.tt.list) loadTimetable();
+  const n = nowLecture();
+  const pin = [[n.runningCourse, 'live'], [n.nextCourse, 'next']].filter(([k], i, all) => k && all.findIndex(([x]) => x && x.id === k.id) === i);
+  const badge = new Map();
+  for (const [k, kind] of pin.reverse()) {
+    const i = list.findIndex((x) => x.id === k.id);
+    const item = i >= 0 ? list.splice(i, 1)[0] : !q ? k : null;
+    if (!item) continue;
+    list.unshift(item);
+    badge.set(k.id, kind === 'live' ? { cls: 'live', text: 'Jetzt im Unterricht', sub: `noch ${ttMins(n.running.end - Date.now())}` } : { cls: 'next', text: `Heute ${ttClock(n.next.start)} Uhr`, sub: 'Als Nächstes' });
+  }
+  S.ui.courseBadges = badge;
   const filters = [['all', 'Alle'], ['inprogress', 'Laufend'], ['future', 'Zukünftig'], ['past', 'Vergangen'], ['fav', 'Favoriten']];
 
   return `<div class="page wide">
@@ -830,8 +1088,8 @@ function renderCourses() {
       <div class="segmented"><button class="${S.ui.courseView === 'cards' ? 'on' : ''}" data-action="course-view" data-v="cards" title="Kacheln">${icon('grid', 'sm')}</button><button class="${S.ui.courseView === 'list' ? 'on' : ''}" data-action="course-view" data-v="list" title="Liste">${icon('list', 'sm')}</button></div>
     </div>
     ${!list.length ? `<div class="card empty">${icon('book')}<div>Keine Kurse für diesen Filter</div></div>`
-      : S.ui.courseView === 'cards' ? `<div class="course-grid">${list.map(courseCard).join('')}</div>`
-      : `<div class="course-list">${list.map((k) => `<div class="course-row" data-action="course" data-id="${k.id}"><div class="thumb ${k.image ? '' : 'ph'}" style='${courseBg(k)}'>${courseMono(k)}</div><div class="grow"><div class="muted small">${esc(k.categoryname || k.shortname)}</div><h3>${esc(k.fullname)}</h3></div>${k.progress != null ? `<div style="width:140px;display:flex;gap:8px;align-items:center" class="small muted"><div class="progress"><i style="width:${Math.round(k.progress)}%"></i></div>${Math.round(k.progress)}%</div>` : ''}<span class="muted small" style="width:120px;text-align:right">${k.lastaccess ? 'Zuletzt ' + fmtDate(k.lastaccess) : ''}</span></div>`).join('')}</div>`}
+      : S.ui.courseView === 'cards' ? `<div class="class-grid all">${list.map((k, i) => courseTile(k, i, badge.get(k.id))).join('')}</div>`
+      : `<div class="course-list">${list.map((k) => `<div class="course-row${badge.get(k.id) ? ` now-${badge.get(k.id).cls}` : ''}" data-action="course" data-id="${k.id}"><div class="thumb ${k.image ? '' : 'ph'}" style='${courseBg(k)}'>${courseMono(k)}</div><div class="grow"><div class="muted small">${esc(k.categoryname || k.shortname)}</div><h3>${esc(k.fullname)}</h3></div>${badge.get(k.id) ? `<span class="now-badge ${badge.get(k.id).cls}">${badge.get(k.id).cls === 'live' ? '<i class="now-dot"></i>' : icon('clock', 'sm')}${esc(badge.get(k.id).text)}</span>` : ''}${k.progress != null ? `<div style="width:140px;display:flex;gap:8px;align-items:center" class="small muted"><div class="progress"><i style="width:${Math.round(k.progress)}%"></i></div>${Math.round(k.progress)}%</div>` : ''}<span class="muted small" style="width:120px;text-align:right">${k.lastaccess ? 'Zuletzt ' + fmtDate(k.lastaccess) : ''}</span></div>`).join('')}</div>`}
   </div>`;
 }
 
@@ -1321,7 +1579,7 @@ function dishTags(e) {
 async function loadDualis() {
   if (!api.dualisStatus) return;
   S.dualis.st = await api.dualisStatus().catch(() => S.dualis.st);
-  if (S.route.name === 'grades') renderMain();
+  if (S.route.name === 'grades' || S.route.name === 'dashboard') renderMain();
 }
 
 // Notenprofil: jede Note als Punkt auf der Skala (1,0 = beste, links), in Studienreihenfolge,
@@ -1334,14 +1592,16 @@ function gradeChartHtml(data) {
   const x = (g) => ((Math.min(max, Math.max(1, g)) - 1) / (max - 1)) * 100;
   const fmt = (n) => n.toFixed(1).replace('.', ',');
   const ticks = Array.from({ length: max }, (_, i) => i + 1);
-  const gpa = num(data.gpa.total);
+  const gx = INS.gpaExact(data);
+  const gpa = gx.total != null ? gx.total : num(data.gpa.total);
+  const gpaText = gx.total != null ? INS.fmtGrade(gx.total) : data.gpa.total;
   return `<div class="card grade-chart">
     <div class="grade-group-head"><div><h3>Notenprofil</h3><p class="muted small">Jedes benotete Modul in Studienreihenfolge · links ist besser${Number.isFinite(gpa) ? ' · gestrichelt: dein Gesamt-GPA' : ''}</p></div></div>
     <div class="gc">
       <div class="gc-row gc-axis"><span></span><div class="gc-ticks">${ticks.map((t) => `<span style="left:${x(t)}%">${fmt(t)}</span>`).join('')}</div></div>
       <div class="gc-body">
         <div class="gc-grid" aria-hidden="true">${ticks.map((t) => `<i style="left:${x(t)}%"></i>`).join('')}
-          ${Number.isFinite(gpa) ? `<b class="gc-gpa" style="left:${x(gpa)}%"><span>Ø ${esc(data.gpa.total)}</span></b>` : ''}</div>
+          ${Number.isFinite(gpa) ? `<b class="gc-gpa" style="left:${x(gpa)}%"><span>Ø ${esc(gpaText)}</span></b>` : ''}</div>
         ${mods.map((m) => {
           const g = num(m.grade);
           const tip = `${m.name}: ${m.grade}${m.credits ? ` · ${String(m.credits).replace('.', ',')} Credits` : ''}${Number.isFinite(gpa) ? ` · ${g < gpa ? 'besser als' : g > gpa ? 'schlechter als' : 'genau'} dein Schnitt` : ''}`;
@@ -1403,12 +1663,15 @@ function renderGrades() {
   const credits = data.total && data.total.credits != null ? data.total.credits : mods.reduce((s, m) => s + (m.grade ? m.credits || 0 : 0), 0);
   const fmt = (n) => String(n).replace('.', ',');
   const pct = data.required ? Math.min(100, Math.round((credits / data.required) * 100)) : null;
-  const tile = (label, value, sub = '') => `<div class="grade-tile"><span>${label}</span><b>${esc(value || '–')}</b>${sub}</div>`;
+  const tile = (label, value, sub = '', tint = '') => `<div class="grade-tile ${tint}"><span>${label}</span><b>${esc(value || '–')}</b>${sub}</div>`;
+  // Dualis zeigt den Schnitt mit einer Nachkommastelle – hier genau (zwei Stellen), wenn er sich nachrechnen lässt
+  const gx = INS.gpaExact(data);
+  const gpaTile = (label, exact, shown, tint) => tile(label, exact != null ? INS.fmtGrade(exact) : shown, exact != null && shown ? `<small>Dualis zeigt ${esc(shown)}</small>` : '', tint);
   const tiles = `<div class="grade-tiles">
-      ${tile('Gesamt-GPA', data.gpa.total)}
-      ${tile('Hauptfach-GPA', data.gpa.major)}
-      ${tile('Credits', fmt(credits), data.required ? `<div class="progress"><i style="width:${pct}%"></i></div><small>${pct} % von ${fmt(data.required)}</small>` : '')}
-      ${tile('Module mit Note', `${graded} / ${mods.length}`)}
+      ${gpaTile('Gesamt-GPA', gx.total, data.gpa.total, 't-violet')}
+      ${gpaTile('Hauptfach-GPA', gx.major, data.gpa.major, 't-mint')}
+      ${tile('Credits', fmt(credits), data.required ? `<div class="progress"><i style="width:${pct}%"></i></div><small>${pct} % von ${fmt(data.required)}</small>` : '', 't-peach')}
+      ${tile('Module mit Note', `${graded} / ${mods.length}`, '', 't-sky')}
     </div>`;
   const groups = data.groups
     .map(
@@ -1509,7 +1772,7 @@ function ttColor(title) {
   const base = String(title).replace(/\(.*$/, '').trim().toLowerCase();
   let h = 0;
   for (const c of base) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return h % 8;
+  return h % 3;
 }
 
 // Verschiebevorschläge je Stundenplan: Termin-ID → alte und neue Zeit. Sie bleiben auf diesem Gerät
@@ -1529,11 +1792,21 @@ function ttSaveMoves(map) {
 function ttSetMove(e, start, end) {
   const map = { ...ttMoves() };
   if (start === e.start && end === e.end) delete map[e.id];
-  else map[e.id] = { id: e.id, title: e.title, location: e.location, start: e.start, end: e.end, newStart: start, newEnd: end };
+  else map[e.id] = { id: e.id, title: e.title, location: e.location, persons: e.persons || [], start: e.start, end: e.end, newStart: start, newEnd: end };
   ttSaveMoves(map);
 }
 
-async function loadTimetable(force = false) {
+// Lädt Liste, angezeigte Woche und die aktuelle Woche (für „Jetzt im Unterricht“). Aufrufe laufen
+// nacheinander, damit sich ein Wochenwechsel während eines Abrufs nicht mit diesem überkreuzt.
+function loadTimetable(force = false) {
+  const t = S.tt;
+  const run = () => loadTimetableNow(force);
+  const p = (t.loading || Promise.resolve()).then(run, run);
+  t.loading = p;
+  p.finally(() => { if (t.loading === p) t.loading = null; }).catch(() => {});
+  return p;
+}
+async function loadTimetableNow(force) {
   const t = S.tt;
   if (!t.list || force) {
     const r = await api.ttList();
@@ -1548,7 +1821,7 @@ async function loadTimetable(force = false) {
       if (S.route.name === 'timetable') renderMain();
       await api.ttRefresh().catch(() => {});
       t.busy = false;
-      return loadTimetable(true);
+      return loadTimetableNow(true);
     }
   }
   const key = `${t.active}|${t.week}`;
@@ -1558,11 +1831,14 @@ async function loadTimetable(force = false) {
   }
   const thisWeek = ttMonday(new Date());
   const nowKey = `${t.active}|${thisWeek}`;
+  let nowChanged = false;
   if (force || t.nowKey !== nowKey) {
     t.nowKey = nowKey;
     t.nowEvents = !t.active ? [] : t.week === thisWeek ? t.events : await api.ttEvents(t.active, thisWeek, ttAddDays(thisWeek, 7));
+    nowChanged = true;
   }
-  if (S.route.name === 'timetable') renderMain();
+  if (S.route.name === 'timetable' || (nowChanged && ['dashboard', 'courses'].includes(S.route.name))) renderMain();
+  if (nowChanged) renderNowCard();
 }
 
 // Überlappende Termine eines Tages nebeneinander in Spuren anordnen
@@ -1657,13 +1933,17 @@ function placeNowLine() {
   const top = (ttHourOf(Date.now()) - Number(line.dataset.from)) * TT_HOUR_PX;
   line.style.top = `${top}px`;
   line.hidden = top < 0 || top > Number(line.dataset.max);
+  const pill = line.querySelector('.tt-now-pill');
+  if (pill) pill.textContent = ttClock(Date.now());
 }
 
 function renderTimetable() {
   const t = S.tt;
   if (!t.list || t.loadedKey !== `${t.active}|${t.week}`) loadTimetable();
   const plan = t.list && t.list.find((x) => x.id === t.active);
-  const range = `${new Date(t.week).toLocaleDateString('de-DE', { day: 'numeric', month: 'long' })} – ${new Date(ttAddDays(t.week, 6)).toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+  const a = new Date(t.week);
+  const z = new Date(ttAddDays(t.week, 6));
+  const range = a.getMonth() === z.getMonth() ? `${a.getDate()}.–${z.toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' })}` : `${a.toLocaleDateString('de-DE', { day: 'numeric', month: 'long' })} – ${z.toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' })}`;
   const isThisWeek = t.week === ttMonday(new Date());
 
   const head = `<div class="page-head"><div><h1>Stundenplan</h1><p>${plan ? `${esc(plan.name)} · Stand ${relTime(plan.fetchedAt)}${plan.error ? ` · <span style="color:var(--warning)">${esc(plan.error)}</span>` : ''}` : 'Füge deinen Stundenplan-Link hinzu'}</p></div>
@@ -1686,7 +1966,7 @@ function renderTimetable() {
 function ttProposalBar() {
   const list = Object.values(ttMoves());
   if (!list.length) return '';
-  const weeks = [...new Set(list.map((m) => ttIsoWeek(m.start)))].sort((a, b) => a - b);
+  const weeks = [...new Set(list.flatMap((m) => [ttIsoWeek(m.start), ttIsoWeek(m.newStart)]))].sort((a, b) => a - b);
   return `<div class="card tt-proposal">
     ${icon('swap')}
     <div class="grow"><b>${list.length === 1 ? '1 Stunde verschoben' : `${list.length} Stunden verschoben`}</b><small>Nur ein Vorschlag – dein Stundenplan bleibt unverändert · KW ${weeks.join(', ')}</small></div>
@@ -1695,23 +1975,39 @@ function ttProposalBar() {
   </div>`;
 }
 
+// Woche als Raster über den ganzen Tag (0–24 Uhr) in einem eigenen Scrollbereich: so lassen sich Stunden
+// auch früher oder später legen, als der Plan sonst reicht. Links und rechts führen schmale Leisten in die
+// vorige/nächste Woche – beim Ziehen genügt es, kurz darauf zu verweilen.
+const TT_FROM = 0;
+const TT_TO = 24;
+const ttLocked = (start) => start <= Date.now();
+
 function ttWeekGrid(events, range) {
   const t = S.tt;
   const moves = ttMoves();
   const timed = events.filter((e) => !e.allDay);
   const allDay = events.filter((e) => e.allDay);
-  // Verschobene Stunden stehen an der neuen Stelle, an der alten bleibt ein blasser Platzhalter
+  const weekEnd = ttAddDays(t.week, 7);
+  // Verschobene Stunden stehen an der neuen Stelle, an der alten bleibt ein blasser Platzhalter.
+  // Stunden aus anderen Wochen, die in diese Woche verschoben wurden, kommen aus dem Vorschlag selbst.
+  t.evById = new Map();
   const items = [];
   for (const e of timed) {
+    t.evById.set(e.id, e);
     const m = moves[e.id];
-    if (m) items.push({ ev: e, kind: 'ghost', start: e.start, end: e.end }, { ev: e, kind: 'moved', start: m.newStart, end: m.newEnd });
+    if (m) items.push({ ev: e, kind: 'ghost', start: e.start, end: e.end, to: m }, { ev: e, kind: 'moved', start: m.newStart, end: m.newEnd });
     else items.push({ ev: e, kind: 'ev', start: e.start, end: e.end });
+  }
+  for (const m of Object.values(moves)) {
+    if (t.evById.has(m.id) || m.newStart < t.week || m.newStart >= weekEnd) continue;
+    const e = { id: m.id, title: m.title, location: m.location || '', persons: m.persons || [], start: m.start, end: m.end, foreign: true };
+    t.evById.set(e.id, e);
+    items.push({ ev: e, kind: 'moved', start: m.newStart, end: m.newEnd });
   }
   const weekend = items.some((x) => x.start >= ttAddDays(t.week, 5));
   const nDays = weekend ? 7 : 5;
-  const from = Math.max(6, Math.min(8, ...items.map((x) => Math.floor(ttHourOf(x.start)))));
-  const to = Math.min(24, Math.max(18, ...items.map((x) => Math.ceil(ttHourOf(x.end) || 24))));
-  const height = (to - from) * TT_HOUR_PX;
+  const height = (TT_TO - TT_FROM) * TT_HOUR_PX;
+  const now = Date.now();
   const today = new Date().setHours(0, 0, 0, 0);
 
   const cols = [];
@@ -1722,35 +2018,66 @@ function ttWeekGrid(events, range) {
     const holidays = allDay.filter((e) => e.start < next && e.end > day);
     const blocks = ttLayoutDay(dayItems).map(({ e: x, lane, lanes }) => {
       const e = x.ev;
-      const top = (ttHourOf(x.start) - from) * TT_HOUR_PX;
+      const top = (ttHourOf(x.start) - TT_FROM) * TT_HOUR_PX;
       const h = Math.max(22, ((x.end - x.start) / 3600000) * TT_HOUR_PX - 3);
-      const room = e.location.split(/\s+/)[0] || '';
+      const room = (e.location || '').split(/\s+/)[0] || '';
       const pos = `top:${top}px;height:${h}px;left:calc(${(lane / lanes) * 100}% + 2px);width:calc(${100 / lanes}% - 4px)`;
-      const cls = `tt-ev c${ttColor(e.title)}${x.kind === 'ev' && x.end < Date.now() ? ' past' : ''}${h < 44 ? ' short' : ''}`;
-      if (x.kind === 'ghost') return `<div class="${cls} ghost" style="${pos}" aria-hidden="true"><b>${esc(e.title)}</b><span class="tt-meta">bisher ${ttClock(e.start)}–${ttClock(e.end)}</span></div>`;
+      const locked = x.kind !== 'ghost' && ttLocked(x.start);
+      const dim = t.filter && INS.cleanTitle(e.title) !== t.filter;
+      const cls = `tt-ev c${ttColor(e.title)}${x.kind === 'ev' && x.end < now ? ' past' : ''}${h < 44 ? ' short' : ''}${locked ? ' locked' : ''}${dim ? ' dim' : ''}${x.kind !== 'ghost' && x.start <= now && x.end > now ? ' live' : ''}`;
+      if (x.kind === 'ghost') {
+        const away = x.to.newStart < t.week || x.to.newStart >= weekEnd;
+        return `<div class="${cls} ghost" style="${pos}" aria-hidden="true"><b>${esc(e.title)}</b><span class="tt-meta">${away ? `→ ${esc(TTP.span(x.to.newStart, x.to.newEnd))}` : `bisher ${ttClock(e.start)}–${ttClock(e.end)}`}</span></div>`;
+      }
       const moved = x.kind === 'moved';
-      const tip = [e.title, `${ttClock(x.start)}–${ttClock(x.end)}`, moved ? `Vorschlag, bisher ${TTP.span(e.start, e.end)}` : '', e.location, e.persons.join(', '), 'Ziehen zum Verschieben'].filter(Boolean).join('\n');
-      return `<button class="${cls}${moved ? ' moved' : ''}" style="${pos}" data-action="tt-event" data-i="${t.events.indexOf(e)}" title="${esc(tip)}">
-        <b>${esc(e.title)}</b><span class="tt-meta">${ttClock(x.start)}–${ttClock(x.end)}${room ? ` · ${esc(room)}` : ''}</span>${h > 80 && e.persons.length ? `<span class="tt-who">${esc(e.persons.join(', '))}</span>` : ''}
+      const tip = [e.title, `${ttClock(x.start)}–${ttClock(x.end)}`, moved ? `Vorschlag, bisher ${TTP.span(e.start, e.end)}` : '', e.location, (e.persons || []).join(', '), locked ? 'Schon begonnen – lässt sich nicht mehr verschieben' : 'Ziehen zum Verschieben'].filter(Boolean).join('\n');
+      return `<button class="${cls}${moved ? ' moved' : ''}" style="${pos}" data-action="tt-event" data-id="${esc(e.id)}" title="${esc(tip)}">
+        <b>${esc(e.title)}</b><span class="tt-meta">${ttClock(x.start)}–${ttClock(x.end)}${room ? ` · ${esc(room)}` : ''}</span>${h > 80 && e.persons && e.persons.length ? `<span class="tt-who">${esc(e.persons.join(', '))}</span>` : ''}
       </button>`;
     }).join('');
     const isToday = day === today;
+    // Vergangenes ausgegraut: dorthin lässt sich nichts verschieben
+    const pastH = next <= now ? height : isToday ? Math.max(0, (ttHourOf(now) - TT_FROM) * TT_HOUR_PX) : 0;
     cols.push(`<div class="tt-col${isToday ? ' today' : ''}" data-day="${day}">
       <div class="tt-day"><span>${TT_DAYS[i].slice(0, 2)}</span><b>${new Date(day).getDate()}.</b>${holidays.map((e) => `<em class="tt-holiday" title="${esc(e.title)}">${esc(e.title)}</em>`).join('')}</div>
-      <div class="tt-body" style="height:${height}px">${blocks}${isToday ? `<div class="tt-now" id="tt-now" data-from="${from}" data-max="${height}" hidden></div>` : ''}</div>
+      <div class="tt-body" style="height:${height}px">${pastH ? `<i class="tt-pastmask" style="height:${pastH}px"></i>` : ''}${blocks}${isToday ? `<div class="tt-now" id="tt-now" data-from="${TT_FROM}" data-max="${height}" hidden><span class="tt-now-pill"></span></div>` : ''}</div>
     </div>`);
   }
   const hours = [];
-  for (let h = from; h < to; h++) hours.push(`<div class="tt-hour" style="top:${(h - from) * TT_HOUR_PX}px">${String(h).padStart(2, '0')}:00</div>`);
-  setTimeout(placeNowLine);
+  for (let h = TT_FROM; h < TT_TO; h++) hours.push(`<div class="tt-hour" style="top:${(h - TT_FROM) * TT_HOUR_PX}px">${String(h).padStart(2, '0')}:00</div>`);
+  // Erste Ansicht einer Woche: zur ersten Stunde (oder 7:30) scrollen, danach die Position halten
+  const first = items.length ? Math.min(...items.map((x) => ttHourOf(x.start))) : 8;
+  const key = `${t.active}|${t.week}`;
+  if (t.scrollKey !== key) {
+    t.scrollKey = key;
+    // Ab der ersten Stunde; in der aktuellen Woche so weit nach unten, dass die Jetzt-Linie sichtbar ist
+    const thisWeek = now >= t.week && now < weekEnd;
+    const top = Math.max(Math.min(first, 8) - 0.5, thisWeek ? ttHourOf(now) - 4 : 0);
+    t.scrollTop = Math.max(0, (Math.min(top, 17) - TT_FROM) * TT_HOUR_PX);
+  }
+  setTimeout(() => {
+    placeNowLine();
+    const sc = $('.tt-scroll');
+    if (sc && t.scrollTop != null) sc.scrollTop = t.scrollTop;
+  });
+  const wk = (d) => ttIsoWeek(ttAddDays(t.week, 7 * d));
+  const titles = [...new Set(timed.map((e) => INS.cleanTitle(e.title)))].sort((a, b) => a.localeCompare(b, 'de'));
+  if (t.filter && !titles.includes(t.filter)) t.filter = null;
+  const chips = titles.length > 1 ? `<div class="tt-filters"><button class="tt-chip${t.filter ? '' : ' on'}" data-action="tt-filter" data-v="">${t.filter ? '' : icon('check', 'sm')}Alle</button>${titles.slice(0, 8).map((x) => `<button class="tt-chip${t.filter === x ? ' on' : ''}" data-action="tt-filter" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>` : '';
   return `<div class="card tt-card">
-    <div class="tt-range"><b>KW ${ttIsoWeek(t.week)}</b><span>${range}</span><span class="muted">${timed.length} ${timed.length === 1 ? 'Termin' : 'Termine'} · Stunden zum Verschieben ziehen</span></div>
-    <div class="tt-grid" style="--days:${nDays}" data-from="${from}" data-to="${to}">
-      <div class="tt-gutter"><div class="tt-day"></div><div class="tt-body" style="height:${height}px">${hours.join('')}</div></div>
-      ${cols.join('')}
+    <div class="tt-range"><b>${range}</b><span class="tt-kw">KW ${ttIsoWeek(t.week)} · ${timed.length} ${timed.length === 1 ? 'Termin' : 'Termine'}</span>${chips}</div>
+    <div class="tt-scroll" data-scroll="tt">
+      <div class="tt-grid" style="--days:${nDays}" data-from="${TT_FROM}" data-to="${TT_TO}">
+        <div class="tt-gutter tt-edge" data-edge="-1" title="Zum Verschieben hierher ziehen: KW ${wk(-1)}"><div class="tt-day"><button class="tt-edge-btn" data-action="tt-week" data-d="-1" title="Vorige Woche (KW ${wk(-1)})">${icon('chevleft', 'sm')}</button></div><div class="tt-body" style="height:${height}px">${hours.join('')}</div></div>
+        ${cols.join('')}
+        <div class="tt-rail tt-edge" data-edge="1" title="Zum Verschieben hierher ziehen: KW ${wk(1)}"><div class="tt-day"><button class="tt-edge-btn" data-action="tt-week" data-d="1" title="Nächste Woche (KW ${wk(1)})">${icon('chevright', 'sm')}</button></div><div class="tt-body" style="height:${height}px"><span class="tt-rail-label">KW ${wk(1)}</span></div></div>
+      </div>
     </div>
   </div>`;
 }
+document.addEventListener('scroll', (e) => {
+  if (e.target && e.target.dataset && e.target.dataset.scroll === 'tt') S.tt.scrollTop = e.target.scrollTop;
+}, true);
 
 function ttManageCard() {
   const t = S.tt;
@@ -1774,27 +2101,36 @@ function ttManageCard() {
 }
 
 // ---------- Stundenplan: Stunden per Drag & Drop verschieben ----------
-// Mit Maus und Stift; auf Touch scrollt die Seite wie bisher. Erst ab ein paar Pixeln Bewegung wird
-// gezogen, ein Klick öffnet weiter die Details. Esc oder Loslassen neben dem Plan bricht ab.
+// Mit Maus und Stift; auf Touch scrollt die Seite wie bisher (dort hilft „Verschieben auf …“ im Detailfenster).
+// Erst ab ein paar Pixeln Bewegung wird gezogen, ein Klick öffnet weiter die Details. Esc oder Loslassen
+// neben dem Plan bricht ab. Ziele in der Vergangenheit sind gesperrt, schon begonnene Stunden auch.
+// Am oberen/unteren Rand scrollt der Tag mit, links/rechts auf der Leiste verweilen blättert die Woche.
 const TTD = { drag: null, swallowClick: false };
 
 document.addEventListener('pointerdown', (e) => {
   if (S.route.name !== 'timetable' || e.button !== 0 || e.pointerType === 'touch') return;
-  const el = e.target.closest && e.target.closest('button.tt-ev[data-i]');
-  const ev = el && S.tt.events[Number(el.dataset.i)];
+  const el = e.target.closest && e.target.closest('button.tt-ev[data-id]');
+  const ev = el && S.tt.evById && S.tt.evById.get(el.dataset.id);
   if (!ev) return;
   const m = ttMoves()[ev.id];
-  TTD.drag = { el, ev, id: e.pointerId, x0: e.clientX, y0: e.clientY, grabY: e.clientY - el.getBoundingClientRect().top, start: m ? m.newStart : ev.start, duration: ev.end - ev.start, started: false, target: null };
+  const start = m ? m.newStart : ev.start;
+  TTD.drag = { el, ev, id: e.pointerId, x0: e.clientX, y0: e.clientY, grabY: e.clientY - el.getBoundingClientRect().top, start, duration: ev.end - ev.start, started: false, target: null, locked: ttLocked(start) };
 });
 document.addEventListener('pointermove', (e) => {
   const d = TTD.drag;
   if (!d || e.pointerId !== d.id) return;
   if (!d.started) {
     if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 5) return;
+    if (d.locked) {
+      TTD.drag = null;
+      toast('Diese Stunde hat schon begonnen und lässt sich nicht mehr verschieben', true);
+      return;
+    }
     ttDragBegin(d);
   }
-  if (!d.el.isConnected) return ttDragEnd(false); // Plan wurde inzwischen neu aufgebaut
-  ttDragMove(d, e.clientX, e.clientY);
+  d.x = e.clientX;
+  d.y = e.clientY;
+  ttDragMove(d);
 });
 document.addEventListener('pointerup', (e) => TTD.drag && e.pointerId === TTD.drag.id && ttDragEnd(true));
 document.addEventListener('pointercancel', (e) => TTD.drag && e.pointerId === TTD.drag.id && ttDragEnd(false));
@@ -1813,49 +2149,115 @@ window.addEventListener('click', (e) => {
   e.stopImmediatePropagation();
 }, true);
 
+// Verweise auf das Raster holen – auch nach einem Wochenwechsel, wenn der Plan neu aufgebaut wurde
+function ttDragRefs(d) {
+  d.grid = $('.tt-grid');
+  d.scroller = $('.tt-scroll');
+  d.cols = d.grid ? [...d.grid.querySelectorAll('.tt-col[data-day]')] : [];
+  d.edges = d.grid ? [...d.grid.querySelectorAll('.tt-edge')] : [];
+  if (!d.grid || !d.scroller) return false;
+  d.grid.classList.add('dragging');
+  const src = d.grid.querySelector(`button.tt-ev[data-id="${CSS.escape(d.ev.id)}"]`);
+  if (src) src.classList.add('drag-src');
+  return true;
+}
+
 function ttDragBegin(d) {
   d.started = true;
   try { d.el.setPointerCapture(d.id); } catch {}
-  d.grid = $('.tt-grid');
-  d.from = Number(d.grid.dataset.from);
-  d.to = Number(d.grid.dataset.to);
-  d.cols = [...d.grid.querySelectorAll('.tt-col[data-day]')];
   d.float = d.el.cloneNode(true);
   d.float.classList.add('tt-float');
-  d.float.classList.remove('past', 'moved');
+  d.float.classList.remove('past', 'moved', 'drag-src');
   d.float.removeAttribute('data-action');
   d.float.removeAttribute('title');
   d.float.style.height = `${d.el.offsetHeight}px`;
   document.body.appendChild(d.float);
-  d.el.classList.add('drag-src');
-  d.grid.classList.add('dragging');
+  ttDragRefs(d);
   document.body.classList.add('tt-grabbing');
+  // Rand-Scrollen läuft unabhängig von Mausbewegungen weiter
+  const tick = () => {
+    if (TTD.drag !== d) return;
+    const sc = d.scroller;
+    if (sc && sc.isConnected && d.y != null && !d.switching) {
+      const r = sc.getBoundingClientRect();
+      const up = r.top + 58 + 36 - d.y; // unter den mitlaufenden Tageskopf
+      const down = d.y - (r.bottom - 36);
+      const v = up > 0 && d.y > r.top - 40 ? -Math.min(18, up / 3) : down > 0 && d.y < r.bottom + 40 ? Math.min(18, down / 3) : 0;
+      if (v) {
+        sc.scrollTop += v;
+        ttDragMove(d);
+      }
+    }
+    d.raf = requestAnimationFrame(tick);
+  };
+  d.raf = requestAnimationFrame(tick);
 }
 
-function ttDragMove(d, x, y) {
-  const box = d.grid.getBoundingClientRect();
+async function ttDragSwitchWeek(d, dir) {
+  d.switching = true;
+  S.tt.week = ttAddDays(S.tt.week, 7 * dir);
+  await loadTimetable();
+  d.switching = false;
+  d.edgeDir = 0;
+  d.lastSwitch = Date.now();
+  if (TTD.drag !== d) return;
+  if (!ttDragRefs(d)) return ttDragEnd(false);
+  ttDragMove(d);
+}
+
+function ttDragMove(d) {
+  if (d.switching || d.x == null) return;
+  // Plan wurde zwischendurch neu aufgebaut (z. B. Aktualisierung im Hintergrund): Verweise neu holen
+  if ((!d.grid || !d.grid.isConnected) && !ttDragRefs(d)) return;
+  const x = d.x;
+  const y = d.y;
+  const box = d.scroller.getBoundingClientRect();
   const outside = x < box.left - 40 || x > box.right + 40 || y < box.top - 40 || y > box.bottom + 40;
+
+  // Links/rechts auf der Leiste: nach kurzem Verweilen die Woche wechseln
+  const edge = outside ? null : d.edges.find((el) => { const r = el.getBoundingClientRect(); return x >= r.left && x < r.right; });
+  const dir = edge ? Number(edge.dataset.edge) : 0;
+  d.edges.forEach((el) => el.classList.toggle('armed', el === edge));
+  if (dir !== d.edgeDir) {
+    clearTimeout(d.edgeTimer);
+    d.edgeDir = dir;
+    // Erster Wechsel nach kurzem Verweilen, weitere (beim Stehenbleiben) etwas langsamer
+    const delay = d.lastSwitch && Date.now() - d.lastSwitch < 1500 ? 1000 : 650;
+    if (dir) d.edgeTimer = setTimeout(() => TTD.drag === d && d.edgeDir === dir && ttDragSwitchWeek(d, dir), delay);
+  }
+
   const rects = d.cols.map((c) => c.querySelector('.tt-body').getBoundingClientRect());
   let i = rects.findIndex((r) => x >= r.left && x < r.right);
   if (i < 0) i = x < rects[0].left ? 0 : rects.length - 1;
   const r = rects[i];
-  const start = TTP.dropStart({ day: Number(d.cols[i].dataset.day), fromHour: d.from, toHour: d.to, y: y - d.grabY - r.top, hourPx: TT_HOUR_PX, duration: d.duration });
-  d.target = outside ? null : { start, end: start + d.duration };
-  Object.assign(d.float.style, { left: `${r.left + 2}px`, top: `${r.top + (ttHourOf(start) - d.from) * TT_HOUR_PX}px`, width: `${r.width - 4}px` });
-  d.float.classList.toggle('invalid', outside);
+  const start = TTP.dropStart({ day: Number(d.cols[i].dataset.day), fromHour: TT_FROM, toHour: TT_TO, y: y - d.grabY - r.top, hourPx: TT_HOUR_PX, duration: d.duration });
+  const past = start < Date.now();
+  const invalid = outside || past || !!edge;
+  d.target = invalid ? null : { start, end: start + d.duration };
+  const top = r.top + (ttHourOf(start) - TT_FROM) * TT_HOUR_PX;
+  Object.assign(d.float.style, { left: `${r.left + 2}px`, top: `${Math.max(box.top + 58, Math.min(box.bottom - 24, top))}px`, width: `${r.width - 4}px` });
+  d.float.classList.toggle('invalid', invalid);
   const meta = d.float.querySelector('.tt-meta');
-  if (meta) meta.textContent = `${TT_DAYS[(new Date(start).getDay() + 6) % 7].slice(0, 2)} ${ttClock(start)}–${ttClock(start + d.duration)}`;
-  d.cols.forEach((c, j) => c.classList.toggle('drop', !outside && j === i));
+  if (meta) {
+    const dt = new Date(start);
+    meta.textContent = edge ? `${dir < 0 ? '←' : '→'} KW ${ttIsoWeek(ttAddDays(S.tt.week, 7 * dir))}`
+      : past ? 'Liegt in der Vergangenheit'
+      : `${TT_DAYS[(dt.getDay() + 6) % 7].slice(0, 2)} ${dt.getDate()}.${dt.getMonth() + 1}. · ${ttClock(start)}–${ttClock(start + d.duration)}`;
+  }
+  d.cols.forEach((c, j) => c.classList.toggle('drop', !invalid && j === i));
 }
 
 function ttDragEnd(commit) {
   const d = TTD.drag;
   TTD.drag = null;
   if (!d || !d.started) return;
+  cancelAnimationFrame(d.raf);
+  clearTimeout(d.edgeTimer);
   d.float.remove();
-  d.el.classList.remove('drag-src');
-  d.grid.classList.remove('dragging');
-  d.cols.forEach((c) => c.classList.remove('drop'));
+  document.querySelectorAll('.tt-ev.drag-src').forEach((x) => x.classList.remove('drag-src'));
+  if (d.grid) d.grid.classList.remove('dragging');
+  (d.cols || []).forEach((c) => c.classList.remove('drop'));
+  (d.edges || []).forEach((c) => c.classList.remove('armed'));
   document.body.classList.remove('tt-grabbing');
   TTD.swallowClick = true;
   setTimeout(() => { TTD.swallowClick = false; }, 0);
@@ -3450,16 +3852,29 @@ const actions = {
     loadTimetable(true);
   },
   'tt-event': (el) => {
-    const e = S.tt.events[Number(el.dataset.i)];
+    const e = S.tt.evById && S.tt.evById.get(el.dataset.id);
     if (!e) return;
     const m = ttMoves()[e.id];
+    const cur = m ? m.newStart : e.start;
     const day = new Date(e.start).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
+    const k = INS.courseFor(e.title, courses());
+    const pad = (n) => String(n).padStart(2, '0');
+    const dt = new Date(cur);
+    const locked = ttLocked(cur);
     showModal(`<h3>${esc(e.title)}</h3>
       <dl class="kv"><dt>Wann</dt><dd>${day}, ${ttClock(e.start)}–${ttClock(e.end)}</dd>
       ${m ? `<dt>Vorschlag</dt><dd>${esc(TTP.span(m.newStart, m.newEnd))}</dd>` : ''}
       ${e.location ? `<dt>Raum</dt><dd>${esc(e.location)}</dd>` : ''}
-      ${e.persons.length ? `<dt>Dozent</dt><dd>${esc(e.persons.join(', '))}</dd>` : ''}
-      ${e.category ? `<dt>Art</dt><dd>${esc(e.category)}</dd>` : ''}</dl>
+      ${e.persons && e.persons.length ? `<dt>Dozent</dt><dd>${esc(e.persons.join(', '))}</dd>` : ''}
+      ${e.category ? `<dt>Art</dt><dd>${esc(e.category)}</dd>` : ''}
+      ${k ? `<dt>Kurs</dt><dd><a href="#" data-action="course" data-id="${k.id}">${esc(k.fullname)}</a></dd>` : ''}</dl>
+      ${locked ? '<p class="muted small tt-move-note">Diese Stunde hat schon begonnen und lässt sich nicht mehr verschieben.</p>' : `<form class="tt-move-form" data-submit="tt-move-to" data-id="${esc(e.id)}">
+        <label>Verschieben auf</label>
+        <div class="tt-move-row"><input class="input" type="date" id="ttm-date" min="${new Date().toISOString().slice(0, 10)}" value="${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}" required />
+        <input class="input" type="time" id="ttm-time" step="900" value="${pad(dt.getHours())}:${pad(dt.getMinutes())}" required />
+        <button class="btn primary">${icon('swap', 'sm')} Verschieben</button></div>
+        <small class="muted">Beliebige Woche und Uhrzeit, nur nicht in der Vergangenheit. Dauer bleibt ${ttMins(e.end - e.start)}.</small>
+      </form>`}
       <div class="row">${m ? `<button class="btn ghost" data-action="tt-move-undo" data-id="${esc(e.id)}">Verschiebung zurücknehmen</button>` : ''}<button class="btn" data-action="modal-close">Schließen</button></div>`);
   },
   'tt-move-undo': (el) => {
@@ -3540,6 +3955,18 @@ const actions = {
     renderMain();
   },
   'model-toggle': () => { S.ui.modelOpen = !S.ui.modelOpen; renderClaude(); },
+  // Karte „Jetzt im Unterricht“: zum passenden Kurs, sonst zum Stundenplan
+  'cal-month': (el) => {
+    const d = new Date(S.ui.calMonth || new Date().setDate(1));
+    d.setDate(1);
+    d.setMonth(d.getMonth() + Number(el.dataset.d));
+    S.ui.calMonth = d.getTime();
+    const c = $('#mini-cal');
+    if (c) c.innerHTML = miniCalHtml();
+  },
+  'tt-filter': (el) => { S.tt.filter = el.dataset.v || null; renderMain(); },
+  'cal-day': (el) => { S.tt.week = ttMonday(Number(el.dataset.day)); go('timetable'); },
+  'now-open': (el) => (el.dataset.course ? go('course', { id: Number(el.dataset.course), tab: 'content' }) : go('timetable')),
   'toggle-claude': () => { S.ui.claudeOpen = !S.ui.claudeOpen; $('#claude').classList.toggle('closed', !S.ui.claudeOpen); renderNav(); if (S.ui.claudeOpen) setTimeout(() => $('#chat-input') && $('#chat-input').focus(), 220); },
   dropdown: (el) => { S.ui.dropdown = S.ui.dropdown === el.dataset.dd ? null : el.dataset.dd; renderNav(); },
   'clear-news': async () => { await api.clearNews(); S.data = await api.data(); S.ui.dropdown = null; renderNav(); renderMain(); },

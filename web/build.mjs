@@ -37,17 +37,18 @@ html = vendorPath(html)
   .replace('<meta charset="utf-8" />', `<meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="${pkg.description}" />
-  <meta name="theme-color" content="#0f6cbf" />
+  <meta name="theme-color" content="#1b1f27" />
   <link rel="icon" href="/icon.png" />
   <link rel="apple-touch-icon" href="/icon.png" />
   <link rel="manifest" href="/manifest.webmanifest" />`)
   .replace('<link rel="stylesheet" href="styles.css" />', '<link rel="stylesheet" href="/styles.css" />\n  <link rel="stylesheet" href="/web.css" />')
   .replace('<script src="icons.js"></script>', '<script src="/backend.js"></script>\n  <script src="/icons.js"></script>')
   .replace('<script src="tt-proposal.js"></script>', '<script src="/tt-proposal.js"></script>')
+  .replace('<script src="insights.js"></script>', '<script src="/insights.js"></script>')
   .replace('<script src="app.js"></script>', '<script src="/app.js"></script>');
 fs.writeFileSync(path.join(out, 'index.html'), html);
 
-for (const f of ['app.js', 'icons.js', 'tt-proposal.js', 'styles.css']) fs.copyFileSync(r('src/renderer', f), path.join(out, f));
+for (const f of ['app.js', 'icons.js', 'tt-proposal.js', 'insights.js', 'styles.css']) fs.copyFileSync(r('src/renderer', f), path.join(out, f));
 // viewer.js lädt pdf.js relativ zu sich selbst
 fs.writeFileSync(path.join(out, 'viewer.js'), fs.readFileSync(r('src/renderer/viewer.js'), 'utf8').replaceAll('../../node_modules/', './vendor/'));
 
@@ -73,8 +74,8 @@ fs.writeFileSync(
     lang: 'de',
     start_url: '/',
     display: 'standalone',
-    background_color: '#f5f7fa',
-    theme_color: '#0f6cbf',
+    background_color: '#f2f4f7',
+    theme_color: '#1b1f27',
     icons: [{ src: '/icon.png', sizes: '512x512', type: 'image/png', purpose: 'any' }],
   }, null, 2),
 );

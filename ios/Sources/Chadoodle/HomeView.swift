@@ -1,4 +1,6 @@
-// Start: aktuelle Vorlesung, Mensa heute, anstehende Abgaben, neue Dateien und der Sync-Status – als Karten wie in den Apple-Apps.
+// Übersicht wie auf Desktop und Website: Begrüßungsbanner mit der laufenden Vorlesung, Kurse als
+// einfarbige Karten in drei Abstufungen, heutige Vorlesungen, Fristen und neue Dateien – flache weiße
+// Karten auf hellgrauem Grund, nur die drei App-Farben.
 import SwiftUI
 
 enum Route: Hashable {
@@ -21,47 +23,51 @@ extension View {
     }
 }
 
-// Gemeinsamer Tab-Wechsel (z. B. Karte auf der Startseite → Stundenplan)
+// Gemeinsamer Tab-Wechsel (z. B. Karte auf der Startseite → Stundenplan) und der Assistent als Blatt
 final class TabRouter: ObservableObject {
-    enum Tab: Hashable { case home, courses, timetable, mensa, assistant }
+    enum Tab: String, Hashable { case home, courses, timetable, grades, mensa }
     @Published var tab: Tab = .home
+    @Published var assistant = false
 }
 
 struct HomeView: View {
     @EnvironmentObject private var app: AppModel
     @EnvironmentObject private var timetables: Timetables
     @EnvironmentObject private var mensa: MensaStore
+    @EnvironmentObject private var dualis: DualisStore
     @EnvironmentObject private var router: TabRouter
 
     private var upcoming: [CalEvent] {
         let now = Int(Date().timeIntervalSince1970)
-        return app.cache.events.filter { $0.timesort >= now - 86400 }.sorted { $0.timesort < $1.timesort }.prefix(6).map { $0 }
+        return app.cache.events.filter { $0.timesort >= now - 86400 }.sorted { $0.timesort < $1.timesort }.prefix(5).map { $0 }
     }
 
     private var today: [TTEvent] {
         let cal = Calendar.current
         let start = cal.startOfDay(for: Date())
         return timetables.events(timetables.active?.id, from: start, to: cal.date(byAdding: .day, value: 1, to: start)!)
-            .filter { !$0.allDay && $0.end > Date() }
+            .filter { !$0.allDay && $0.start >= start }
+            .sorted { $0.start < $1.start }
+    }
+
+    private var recentCourses: [Course] {
+        app.cache.courses.filter { !$0.hidden }.sorted { ($0.lastaccess ?? 0) > ($1.lastaccess ?? 0) }.prefix(6).map { $0 }
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    Text(Date().formatted(.dateTime.weekday(.wide).day().month(.wide).locale(deLocale)).uppercased())
-                        .font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
-                        .padding(.horizontal, 4).padding(.bottom, -14)
+                VStack(alignment: .leading, spacing: 24) {
+                    HeroBanner(events: today, greeting: greeting, summary: summary)
 
-                    NowCard(events: today).onTapGesture { router.tab = .timetable }
-
-                    if let d = mensa.plan?.days.first(where: { $0.date == isoDay(Date()) }), !d.dishes.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            SectionTitle("Heute in der Mensa", action: "Speiseplan") { router.tab = .mensa }
+                    if !recentCourses.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionHeader("Deine Kurse", action: "Alle ansehen") { router.tab = .courses }
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 12) {
-                                    ForEach(d.dishes.filter { $0.dhbw != nil || $0.intern != nil }.prefix(6)) { e in
-                                        DishCard(dish: e).onTapGesture { router.tab = .mensa }
+                                    ForEach(Array(recentCourses.enumerated()), id: \.element.id) { i, k in
+                                        NavigationLink(value: Route.course(k.id)) { CourseTile(course: k, index: i).frame(width: 220) }
+                                            .buttonStyle(.plain)
                                     }
                                 }
                                 .padding(.horizontal, 2)
@@ -69,42 +75,62 @@ struct HomeView: View {
                         }
                     }
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        SectionTitle("Bald fällig")
+                    if timetables.active != nil {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionHeader("Heute", action: "Woche") { router.tab = .timetable }
+                            VStack(spacing: 2) {
+                                if today.isEmpty {
+                                    Label("Heute keine Vorlesungen", systemImage: "checkmark.circle")
+                                        .font(.subheadline).foregroundStyle(Color.inkSecondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading).padding(14)
+                                }
+                                ForEach(today) { e in
+                                    let k = courseFor(e.title, in: app.cache.courses)
+                                    Group {
+                                        if let k {
+                                            NavigationLink(value: Route.course(k.id)) { ReminderRow(event: e, course: k) }
+                                        } else {
+                                            Button { router.tab = .timetable } label: { ReminderRow(event: e, course: nil) }
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(6)
+                            .card()
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        SectionHeader("Fristen")
                         VStack(spacing: 0) {
                             if upcoming.isEmpty {
                                 Label("Nichts fällig – gut gemacht!", systemImage: "checkmark.circle")
-                                    .font(.subheadline).foregroundStyle(.secondary)
+                                    .font(.subheadline).foregroundStyle(Color.inkSecondary)
                                     .frame(maxWidth: .infinity, alignment: .leading).padding(14)
                             }
                             ForEach(Array(upcoming.enumerated()), id: \.element.id) { i, e in
                                 NavigationLink(value: e.cmid.map { Route.module($0) } ?? Route.course(e.courseid ?? 0)) {
-                                    HStack {
-                                        DeadlineRow(event: e)
-                                        Spacer()
-                                        Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.tertiary)
-                                    }
-                                    .padding(.horizontal, 14).padding(.vertical, 10)
-                                    .contentShape(Rectangle())
+                                    DeadlineRow(event: e).padding(.horizontal, 14).padding(.vertical, 11).contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                if i < upcoming.count - 1 { Divider().padding(.leading, 70) }
+                                if i < upcoming.count - 1 { Divider().padding(.leading, 14) }
                             }
                         }
                         .card()
                     }
 
-                    let news = app.cache.newItems.prefix(8).compactMap { app.cache.files[$0.fileId] }
+                    let news = app.cache.newItems.prefix(6).compactMap { app.cache.files[$0.fileId] }
                     if !news.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            SectionTitle("Neu synchronisiert", action: "Gelesen") { withAnimation { app.clearNews() } }
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionHeader("Neu synchronisiert", action: "Gelesen") { withAnimation { app.clearNews() } }
                             VStack(spacing: 0) {
                                 ForEach(Array(news.enumerated()), id: \.element.id) { i, f in
                                     NavigationLink(value: Route.doc(f.id, nil)) {
                                         HStack {
                                             FileRow(file: f, showCourse: true)
                                             Spacer()
-                                            Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.tertiary)
+                                            Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(Color.pMid)
                                         }
                                         .padding(.horizontal, 14).padding(.vertical, 10)
                                         .contentShape(Rectangle())
@@ -117,16 +143,32 @@ struct HomeView: View {
                         }
                     }
 
+                    if let d = mensa.plan?.days.first(where: { $0.date == isoDay(Date()) }), !d.dishes.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionHeader("Heute in der Mensa", action: "Speiseplan") { router.tab = .mensa }
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 12) {
+                                    ForEach(d.dishes.filter { $0.dhbw != nil || $0.intern != nil }.prefix(6)) { e in
+                                        DishCard(dish: e).onTapGesture { router.tab = .mensa }
+                                    }
+                                }
+                                .padding(.horizontal, 2)
+                            }
+                        }
+                    }
+
                     SyncStatusRow().padding(14).card()
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 24)
             }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle(greeting)
+            .appBackground()
+            .navigationTitle(Date().formatted(.dateTime.weekday(.wide).day().month(.wide).locale(deLocale)))
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) { AssistantButton() }
                 ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink(value: Route.settings) { Image(systemName: "gearshape") }
+                    NavigationLink(value: Route.settings) { ProfileBadge(name: app.cache.site?.fullname ?? "") }
                 }
             }
             .refreshable { await app.sync() }
@@ -137,101 +179,170 @@ struct HomeView: View {
     private var greeting: String {
         let h = Calendar.current.component(.hour, from: Date())
         let name = app.cache.site?.firstname ?? ""
-        let g = h < 11 ? "Guten Morgen" : h < 18 ? "Hallo" : "Guten Abend"
-        return name.isEmpty ? g : "\(g), \(name)"
+        let g = h < 11 ? "Guten Morgen" : h < 18 ? "Willkommen zurück" : "Guten Abend"
+        return name.isEmpty ? g : "\(g), \(name)!"
+    }
+
+    private var summary: String {
+        let now = Int(Date().timeIntervalSince1970)
+        let soon = app.cache.events.filter { $0.timesort > now && $0.timesort <= now + 2 * 86400 }.count
+        let week = app.cache.events.filter { $0.timesort > now && $0.timesort <= now + 7 * 86400 }.count
+        var parts = [soon > 0 ? "\(soon) \(soon == 1 ? "Frist" : "Fristen") in den nächsten 2 Tagen" : week > 0 ? "\(week) \(week == 1 ? "Frist" : "Fristen") diese Woche" : "Diese Woche keine Fristen"]
+        if let d = dualis.data, let g = fmtGrade(gpaExact(d).total) ?? d.gpa.total { parts.append("Notenschnitt \(g)") }
+        return parts.joined(separator: " · ")
     }
 }
 
-extension View {
-    // Weiße, abgerundete Karte wie in den Apple-Apps (Health, Fitness)
-    func card() -> some View {
-        background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-}
-
-struct SectionTitle: View {
-    let title: String
-    var action: String?
-    var onAction: (() -> Void)?
-
-    init(_ title: String, action: String? = nil, onAction: (() -> Void)? = nil) {
-        self.title = title
-        self.action = action
-        self.onAction = onAction
-    }
+// Kreis mit Initialen (führt zu den Einstellungen)
+struct ProfileBadge: View {
+    let name: String
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title).font(.title3.bold())
-            Spacer()
-            if let action, let onAction { Button(action, action: onAction).font(.subheadline) }
-        }
-        .padding(.horizontal, 4)
+        Text(String(name.split(separator: " ").prefix(2).compactMap(\.first)).uppercased())
+            .font(.caption.bold())
+            .frame(width: 32, height: 32)
+            .background(Color.pMid, in: Circle())
+            .foregroundStyle(.white)
     }
 }
 
-// Aktuelle bzw. nächste Vorlesung heute
-struct NowCard: View {
+// Banner mit Verlauf in den App-Farben, darin die laufende bzw. nächste Vorlesung
+struct HeroBanner: View {
+    @EnvironmentObject private var app: AppModel
+    @EnvironmentObject private var router: TabRouter
     let events: [TTEvent]
+    let greeting: String
+    let summary: String
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 10)) { ctx in
-            let now = ctx.date
-            let current = events.first { $0.start <= now && $0.end > now }
-            let next = events.first { $0.start > now }
-            VStack(alignment: .leading, spacing: 12) {
-                if let e = current ?? next {
-                    let c = lectureColor(e.title)
-                    HStack {
-                        Label(current != nil ? "Jetzt" : "Als Nächstes", systemImage: current != nil ? "dot.radiowaves.left.and.right" : "clock")
-                            .font(.caption.weight(.bold)).foregroundStyle(c)
-                            .textCase(.uppercase)
-                        Spacer()
-                        if let p = current?.elapsed(at: now) {
-                            Text("\(Int(p * 100)) % vorbei").font(.caption.weight(.bold).monospacedDigit()).foregroundStyle(c)
-                                .contentTransition(.numericText())
-                        } else {
-                            Text(e.start, style: .relative).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                        }
-                    }
-                    Text(lectureTitle(e.title)).font(.title2.bold()).lineLimit(2)
-                    HStack(spacing: 14) {
-                        Label("\(e.start.formatted(date: .omitted, time: .shortened)) – \(e.end.formatted(date: .omitted, time: .shortened))", systemImage: "clock")
-                        if !e.location.isEmpty { Label(e.location, systemImage: "mappin.and.ellipse").lineLimit(1) }
-                    }
-                    .font(.subheadline).foregroundStyle(.secondary)
-                    if let p = current?.elapsed(at: now) {
-                        VStack(spacing: 4) {
-                            ProgressView(value: p).tint(c)
-                            Text("noch \(Int(ceil(e.end.timeIntervalSince(now) / 60))) min")
-                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-                    }
-                    let later = events.filter { $0.start > (current?.start ?? now) && $0.id != e.id }
-                    if !later.isEmpty {
-                        Divider()
-                        ForEach(later.prefix(3)) { l in
-                            HStack(spacing: 8) {
-                                Circle().fill(lectureColor(l.title)).frame(width: 8, height: 8)
-                                Text(l.start.formatted(date: .omitted, time: .shortened)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                                Text(lectureTitle(l.title)).font(.caption).lineLimit(1)
-                            }
-                        }
-                    }
-                } else {
-                    HStack(spacing: 14) {
-                        Image(systemName: "sun.max.fill").font(.largeTitle).symbolRenderingMode(.multicolor)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Heute keine Vorlesungen mehr").font(.headline)
-                            Text("Tippe für den Stundenplan").font(.subheadline).foregroundStyle(.secondary)
-                        }
-                    }
+        TimelineView(.periodic(from: .now, by: 30)) { ctx in
+            let n = lectureNow(events, at: ctx.date)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(greeting).font(.title3.bold()).foregroundStyle(Color.pLight)
+                Text(summary).font(.subheadline).foregroundStyle(Color.pLight.opacity(0.8))
+                if let e = n.running ?? n.next {
+                    NowStrip(event: e, running: n.running != nil, course: courseFor(e.title, in: app.cache.courses), now: ctx.date)
+                        .padding(.top, 10)
                 }
             }
-            .padding(16)
+            .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .card()
+            .background(alignment: .bottomTrailing) {
+                Image(systemName: "books.vertical.fill")
+                    .font(.system(size: 92))
+                    .foregroundStyle(Color.pLight.opacity(0.12))
+                    .offset(x: 6, y: 16)
+            }
+            .background(LinearGradient(colors: [.pDark, Color.pDark.opacity(0.85), .pMid], startPoint: .topLeading, endPoint: .bottomTrailing),
+                        in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+    }
+}
+
+struct NowStrip: View {
+    let event: TTEvent
+    let running: Bool
+    let course: Course?
+    let now: Date
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    if running { Circle().fill(Color.pLight).frame(width: 7, height: 7) }
+                    Text(running ? "Jetzt im Unterricht" : "Als Nächstes · \(event.start.formatted(date: .omitted, time: .shortened)) Uhr")
+                }
+                .font(.caption.weight(.semibold)).foregroundStyle(Color.pLight.opacity(0.8))
+                Text(cleanLectureTitle(event.title)).font(.headline).foregroundStyle(Color.pLight).lineLimit(1)
+                Text([running ? "noch \(Int(ceil(event.end.timeIntervalSince(now) / 60))) min" : "\(event.start.formatted(date: .omitted, time: .shortened))–\(event.end.formatted(date: .omitted, time: .shortened))",
+                      event.location].filter { !$0.isEmpty }.joined(separator: " · "))
+                    .font(.caption.monospacedDigit()).foregroundStyle(Color.pLight.opacity(0.8)).lineLimit(1)
+                if let p = event.elapsed(at: now) {
+                    ProgressView(value: p).tint(Color.pLight).padding(.top, 4)
+                }
+            }
+            Spacer(minLength: 0)
+            if let course {
+                NavigationLink(value: Route.course(course.id)) {
+                    Text("Zum Kurs").font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14).padding(.vertical, 9)
+                        .background(Color.pLight.opacity(0.22), in: RoundedRectangle(cornerRadius: 12))
+                        .foregroundStyle(Color.pLight)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(12)
+        .background(Color.pLight.opacity(0.13), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+// Kurs als einfarbige Karte (drei Abstufungen der Palette)
+struct CourseTile: View {
+    @EnvironmentObject private var app: AppModel
+    @EnvironmentObject private var timetables: Timetables
+    let course: Course
+    let index: Int
+    var badge: String?
+
+    var body: some View {
+        let files = app.cache.files.values.filter { $0.courseId == course.id }.count
+        let who = teacher
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top) {
+                Text(course.categoryname ?? course.shortname).font(.caption2.weight(.semibold)).opacity(0.75).lineLimit(1)
+                Spacer(minLength: 4)
+                if let badge { Pill(text: badge, filled: false).environment(\.colorScheme, .light) }
+            }
+            Text(course.fullname).font(.subheadline.bold()).lineLimit(2, reservesSpace: true)
+            Spacer(minLength: 6)
+            Label("\(files) \(files == 1 ? "Datei" : "Dateien")", systemImage: "folder").font(.caption.weight(.medium))
+            if let who { Label(who, systemImage: "person").font(.caption.weight(.medium)).lineLimit(1) }
+            else if let p = course.progress { Label("\(Int(p)) % erledigt", systemImage: "checkmark.circle").font(.caption.weight(.medium)) }
+        }
+        .foregroundStyle(Color.pLight)
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 140, alignment: .topLeading)
+        .background([Color.shade0, .shade1, .shade2][index % 3], in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    // Dozent aus dem Stundenplan (erste passende Vorlesung der nächsten Wochen)
+    private var teacher: String? {
+        let now = Date()
+        let ev = timetables.events(timetables.active?.id, from: now.addingTimeInterval(-7 * 86400), to: now.addingTimeInterval(14 * 86400))
+            .first { !$0.persons.isEmpty && courseFor($0.title, in: app.cache.courses)?.id == course.id }
+        return ev?.persons.joined(separator: ", ")
+    }
+}
+
+// Vorlesung als Erinnerungszeile (Symbol in heller Kachel, Titel, Zeit)
+struct ReminderRow: View {
+    let event: TTEvent
+    let course: Course?
+
+    var body: some View {
+        TimelineView(.everyMinute) { ctx in
+            let now = ctx.date
+            let done = event.end <= now
+            let live = event.start <= now && event.end > now
+            HStack(spacing: 12) {
+                Image(systemName: done ? "checkmark" : live ? "bell.fill" : "clock")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 38, height: 38)
+                    .background(live ? Color.ink : Color.appBackground, in: RoundedRectangle(cornerRadius: 11))
+                    .foregroundStyle(live ? Color.onInk : Color.inkSecondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(cleanLectureTitle(event.title)).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Text(["\(event.start.formatted(date: .omitted, time: .shortened))–\(event.end.formatted(date: .omitted, time: .shortened))", event.location, live ? "jetzt" : ""].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.caption.monospacedDigit()).foregroundStyle(Color.inkSecondary).lineLimit(1)
+                }
+                Spacer()
+                if course != nil { Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(Color.pMid) }
+            }
+            .padding(8)
+            .opacity(done ? 0.5 : 1)
+            .contentShape(Rectangle())
         }
     }
 }
@@ -242,28 +353,27 @@ struct DishCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack {
-                Color(.tertiarySystemFill)
+                Color.softFill
                 if let t = dish.image ?? dish.thumb, let u = URL(string: t) {
-                    AsyncImage(url: u) { img in img.resizable().scaledToFill() } placeholder: { Image(systemName: "fork.knife").foregroundStyle(.tertiary) }
+                    AsyncImage(url: u) { img in img.resizable().scaledToFill() } placeholder: { Image(systemName: "fork.knife").foregroundStyle(Color.pMid) }
                 } else {
-                    Image(systemName: "fork.knife").font(.title2).foregroundStyle(.tertiary)
+                    Image(systemName: "fork.knife").font(.title2).foregroundStyle(Color.pMid)
                 }
             }
             .frame(width: 170, height: 104)
             .clipped()
             VStack(alignment: .leading, spacing: 3) {
-                Text(dish.category.uppercased()).font(.caption2.bold()).foregroundStyle(.secondary).lineLimit(1)
+                Text(dish.category.uppercased()).font(.caption2.bold()).foregroundStyle(Color.inkSecondary).lineLimit(1)
                 Text(dish.title).font(.subheadline.weight(.semibold)).lineLimit(2, reservesSpace: true)
-                Text(fmtEuro(dish.dhbw ?? dish.intern)).font(.caption.weight(.semibold).monospacedDigit()).foregroundStyle(brand)
+                Text(fmtEuro(dish.dhbw ?? dish.intern)).font(.caption.weight(.semibold).monospacedDigit()).foregroundStyle(Color.ink)
             }
             .padding(10)
         }
         .frame(width: 170)
         .card()
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
-
 
 struct SyncStatusRow: View {
     @EnvironmentObject private var app: AppModel
@@ -274,14 +384,14 @@ struct SyncStatusRow: View {
             Group {
                 switch app.status.state {
                 case .syncing, .downloading: ProgressView()
-                case .error: Image(systemName: "exclamationmark.icloud.fill").foregroundStyle(.orange)
-                case .idle: Image(systemName: "checkmark.icloud.fill").foregroundStyle(.green)
+                case .error: Image(systemName: "exclamationmark.icloud.fill").foregroundStyle(Color.ink)
+                case .idle: Image(systemName: "checkmark.icloud.fill").foregroundStyle(Color.pMid)
                 }
             }
             .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.subheadline.weight(.semibold))
-                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(subtitle).font(.caption).foregroundStyle(Color.inkSecondary).lineLimit(1)
             }
             Spacer()
             Button {
@@ -318,19 +428,26 @@ struct DeadlineRow: View {
 
     var body: some View {
         let date = Date(timeIntervalSince1970: TimeInterval(event.timesort))
+        let urgent = event.overdue || date.timeIntervalSinceNow < 2 * 86400
         HStack(spacing: 12) {
             VStack(spacing: 0) {
-                Text(date.formatted(.dateTime.day())).font(.title3.bold())
+                Text(date.formatted(.dateTime.day())).font(.headline)
                 Text(date.formatted(.dateTime.month(.abbreviated).locale(deLocale))).font(.caption2).textCase(.uppercase)
             }
             .frame(width: 44, height: 44)
-            .background((event.overdue ? Color.red : brand).opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-            .foregroundStyle(event.overdue ? .red : brand)
+            .background(urgent ? Color.ink : Color.appBackground, in: RoundedRectangle(cornerRadius: 11))
+            .foregroundStyle(urgent ? Color.onInk : Color.ink)
             VStack(alignment: .leading, spacing: 2) {
-                Text(event.title).font(.subheadline.weight(.medium)).lineLimit(2)
+                Text(event.title).font(.subheadline.weight(.semibold)).lineLimit(2)
                 Text("\(event.coursename) · \(date.formatted(.dateTime.weekday(.abbreviated).hour().minute().locale(deLocale)))")
-                    .font(.caption).foregroundStyle(event.overdue ? .red : .secondary).lineLimit(1)
+                    .font(.caption).foregroundStyle(Color.inkSecondary).lineLimit(1)
             }
+            Spacer(minLength: 4)
+            HStack(spacing: 5) {
+                RoundedRectangle(cornerRadius: 2).fill(urgent ? Color.ink : Color.pMid).frame(width: 8, height: 8)
+                Text(event.overdue ? "Überfällig" : urgent ? "Bald" : "Offen").font(.caption.weight(urgent ? .bold : .regular))
+            }
+            .foregroundStyle(urgent ? Color.ink : Color.inkSecondary)
         }
     }
 }
@@ -343,18 +460,20 @@ struct FileRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: fileIcon(file.ext))
-                .font(.title3).foregroundStyle(file.ext == "pdf" ? .red : brand)
-                .frame(width: 28)
+                .font(.subheadline)
+                .frame(width: 32, height: 32)
+                .background(Color.appBackground, in: RoundedRectangle(cornerRadius: 9))
+                .foregroundStyle(Color.ink)
             VStack(alignment: .leading, spacing: 2) {
                 Text(file.filename).font(.subheadline).lineLimit(2)
                 HStack(spacing: 4) {
                     if showCourse, let k = app.cache.course(file.courseId) { Text(k.title + " ·") }
                     Text(fmtSize(file.filesize))
-                    if file.downloaded { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
-                    else if file.error != nil { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
-                    else { Image(systemName: "icloud").foregroundStyle(.secondary) }
+                    if file.downloaded { Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.pMid) }
+                    else if file.error != nil { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.ink) }
+                    else { Image(systemName: "icloud").foregroundStyle(Color.pMid) }
                 }
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(Color.inkSecondary)
             }
         }
     }

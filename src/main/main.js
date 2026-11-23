@@ -33,6 +33,7 @@ const { Timetables, RAPLA_TEMPLATE } = require('./timetable');
 const { Mensa, DEFAULT_URL: MENSA_DEFAULT } = require('./mensa');
 const { Account } = require('./account');
 const { WebAccess } = require('./web-access');
+const { Dualis } = require('./dualis');
 
 const ICON = path.join(__dirname, '..', '..', 'build', 'icon.png');
 const APP_NAME = 'Chadoodle';
@@ -54,11 +55,13 @@ const docIndex = new DocIndex(sync);
 const aiTools = new AiTools(sync, docIndex);
 const timetables = new Timetables();
 const mensa = new Mensa();
+const dualis = new Dualis();
 const account = new Account(mensa);
 // Zugang zur App nur mit Passkey (wie auf der Website)
 const webAccess = new WebAccess();
 aiTools.timetables = timetables;
 aiTools.mensa = mensa;
+aiTools.dualis = dualis;
 aiTools.onPrepareCart = (cart) => send('mensa:prepare', cart);
 aiTools.onOrdered = (entry) => send('mensa:ordered', entry);
 // Bestellungen des Assistenten bestätigt der Nutzer im Fenster; ohne Antwort binnen 10 Min. = abgelehnt
@@ -115,7 +118,7 @@ function createWindow() {
     show: false,
     title: APP_NAME,
     icon: fs.existsSync(ICON) ? ICON : undefined,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#14161a' : '#f5f7fa',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#16171f' : '#ffffff',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload.js'),
@@ -506,6 +509,12 @@ function registerIpc() {
   ipcMain.handle('tt:select', (_e, id) => store.setSettings({ timetableActive: id }));
   ipcMain.handle('tt:refresh', () => timetables.refreshAll());
 
+  // Dualis-Noten
+  ipcMain.handle('dualis:status', () => dualis.status());
+  ipcMain.handle('dualis:login', (_e, user, pass) => dualis.setCredentials(user, pass));
+  ipcMain.handle('dualis:logout', () => dualis.removeCredentials());
+  ipcMain.handle('dualis:refresh', () => dualis.refresh());
+
   // Mensa-Speiseplan
   ipcMain.handle('mensa:get', (_e, force) => mensa.get(!!force));
   ipcMain.handle('mensa:set-url', (_e, url) => mensa.setUrl(url || MENSA_DEFAULT));
@@ -557,6 +566,14 @@ app.whenReady().then(() => {
 
   timetables.on('changed', () => send('tt:changed'));
   timetables.start();
+  dualis.on('changed', () => send('dualis:changed'));
+  dualis.on('notify', (n) => {
+    if (!store.getSettings().notifications || !Notification.isSupported()) return;
+    const note = new Notification({ title: n.title, body: n.body, icon: ICON });
+    note.on('click', () => { showWindow(); send('navigate', 'grades'); });
+    note.show();
+  });
+  dualis.start();
   mensa.on('changed', () => send('mensa:changed'));
   mensa.start();
 

@@ -553,7 +553,7 @@ fn main() {
                 .visible(false)
                 // HTML5-Drag&Drop (Bilder in den Chat ziehen) statt Tauris eigener Datei-Ablage
                 .disable_drag_drop_handler()
-                .background_color(if dark { tauri::window::Color(0x14, 0x16, 0x1a, 255) } else { tauri::window::Color(0xf5, 0xf7, 0xfa, 255) })
+                .background_color(if dark { tauri::window::Color(0x12, 0x15, 0x1b, 255) } else { tauri::window::Color(0xff, 0xff, 0xff, 255) })
                 .initialization_script(&init)
                 // Hintergrund-Sync auch bei verstecktem Fenster nicht drosseln (wie Electrons Hauptprozess)
                 .additional_browser_args(&browser_args())

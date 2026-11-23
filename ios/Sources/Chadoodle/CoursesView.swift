@@ -5,7 +5,22 @@ import SwiftUI
 struct CoursesView: View {
     @EnvironmentObject private var app: AppModel
     @EnvironmentObject private var index: DocIndex
+    @EnvironmentObject private var timetables: Timetables
     @State private var query = ""
+
+    // Kurs der laufenden und der nächsten Vorlesung (heute) – stehen oben
+    private func pinned(at now: Date) -> [(Course, String)] {
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: now)
+        let todays = timetables.events(timetables.active?.id, from: start, to: cal.date(byAdding: .day, value: 1, to: start)!).filter { $0.start >= start }
+        let n = lectureNow(todays, at: now)
+        var out: [(Course, String)] = []
+        if let r = n.running, let k = courseFor(r.title, in: app.cache.courses) { out.append((k, "Jetzt · noch \(Int(ceil(r.end.timeIntervalSince(now) / 60))) min")) }
+        if let x = n.next, let k = courseFor(x.title, in: app.cache.courses), !out.contains(where: { $0.0.id == k.id }) {
+            out.append((k, "Heute \(x.start.formatted(date: .omitted, time: .shortened)) Uhr"))
+        }
+        return out
+    }
 
     private var courses: [Course] {
         app.cache.courses.filter { !$0.hidden }.sorted { ($0.isfavourite ? 0 : 1, -($0.lastaccess ?? 0)) < ($1.isfavourite ? 0 : 1, -($1.lastaccess ?? 0)) }
@@ -20,12 +35,28 @@ struct CoursesView: View {
                     if courses.isEmpty {
                         ContentUnavailableView("Noch keine Kurse", systemImage: "books.vertical", description: Text("Ziehe nach unten, um zu synchronisieren."))
                     }
-                    ForEach(courses) { k in
-                        NavigationLink(value: Route.course(k.id)) { CourseRow(course: k) }
+                    let pins = pinned(at: Date())
+                    if !pins.isEmpty {
+                        Section("Im Unterricht") {
+                            ForEach(Array(pins.enumerated()), id: \.element.0.id) { i, p in
+                                NavigationLink(value: Route.course(p.0.id)) { CourseTile(course: p.0, index: i, badge: p.1) }
+                                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparator(.hidden)
+                            }
+                        }
+                    }
+                    Section(pins.isEmpty ? "" : "Alle Kurse") {
+                        ForEach(courses.filter { k in !pins.contains { $0.0.id == k.id } }) { k in
+                            NavigationLink(value: Route.course(k.id)) { CourseRow(course: k) }
+                        }
                     }
                 }
             }
             .navigationTitle("Kurse")
+            .scrollContentBackground(.hidden)
+            .appBackground()
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { AssistantButton() } }
             .searchable(text: $query, prompt: "In allen Unterlagen suchen")
             .refreshable { await app.sync() }
             .withRoutes()
@@ -39,13 +70,13 @@ struct CourseRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(color(course.id).gradient)
+            RoundedRectangle(cornerRadius: 12)
+                .fill([Color.shade0, .shade1, .shade2][abs(course.id) % 3])
                 .frame(width: 44, height: 44)
-                .overlay(Text(initials).font(.subheadline.bold()).foregroundStyle(.white))
+                .overlay(Text(initials).font(.caption.bold()).foregroundStyle(Color.pLight))
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
-                    if course.isfavourite { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow) }
+                    if course.isfavourite { Image(systemName: "star.fill").font(.caption2).foregroundStyle(Color.pMid) }
                     Text(course.fullname).font(.subheadline.weight(.medium)).lineLimit(2)
                 }
                 let files = app.cache.files.values.filter { $0.courseId == course.id }
@@ -63,10 +94,6 @@ struct CourseRow: View {
     }
 }
 
-func color(_ id: Int) -> Color {
-    let palette: [Color] = [.blue, .indigo, .teal, .purple, .orange, .pink, .green, .cyan, .mint, .brown]
-    return palette[abs(id) % palette.count]
-}
 
 // Volltextsuche (seitengenau) plus Treffer in Kurs-, Datei- und Aktivitätsnamen
 struct SearchResults: View {
@@ -86,7 +113,7 @@ struct SearchResults: View {
                     NavigationLink(value: Route.doc(f.id, h.page)) {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Image(systemName: fileIcon(f.ext)).foregroundStyle(.red)
+                                Image(systemName: fileIcon(f.ext)).foregroundStyle(Color.ink)
                                 Text(f.filename).font(.subheadline.weight(.medium)).lineLimit(1)
                                 Spacer()
                                 Text("S. \(h.page)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
@@ -158,7 +185,7 @@ struct CourseDetailView: View {
                 Button { showGrades = true } label: { Image(systemName: "rosette") }
             }
         }
-        .sheet(isPresented: $showGrades) { GradesView(courseId: courseId) }
+        .sheet(isPresented: $showGrades) { CourseGradesView(courseId: courseId) }
         .refreshable { await app.sync() }
     }
 }
@@ -176,25 +203,18 @@ struct ModuleRow: View {
         } else {
             NavigationLink(value: Route.module(module.id)) {
                 HStack(spacing: 12) {
-                    Image(systemName: modIcon(module.modname)).font(.title3).foregroundStyle(modColor).frame(width: 28)
+                    Image(systemName: modIcon(module.modname)).font(.subheadline)
+                        .frame(width: 32, height: 32)
+                        .background(Color.appBackground, in: RoundedRectangle(cornerRadius: 9))
+                        .foregroundStyle(Color.ink)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(module.name).font(.subheadline).lineLimit(2)
                         if let sub = subtitle { Text(sub).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                     }
                     Spacer()
-                    if module.completion == 1 || module.completion == 2 { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
+                    if module.completion == 1 || module.completion == 2 { Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.pMid) }
                 }
             }
-        }
-    }
-
-    private var modColor: Color {
-        switch module.modname {
-        case "assign", "quiz": return .pink
-        case "forum": return .orange
-        case "folder": return .teal
-        case "url": return .indigo
-        default: return brand
         }
     }
 
@@ -244,7 +264,7 @@ struct ModuleDetailView: View {
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 4) {
-                                        if d.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.orange) }
+                                        if d.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(Color.ink) }
                                         Text(d.subject).font(.subheadline.weight(.medium))
                                     }
                                     Text("\(d.author) · \(fmtDate(d.modified)) · \(d.replies) Antworten").font(.caption).foregroundStyle(.secondary)
@@ -283,7 +303,7 @@ struct ModuleDetailView: View {
     }
 }
 
-struct GradesView: View {
+struct CourseGradesView: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
     let courseId: Int

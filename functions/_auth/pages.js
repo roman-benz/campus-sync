@@ -11,8 +11,9 @@ export function page(nonce, title, body, script, { wide = false } = {}) {
 <title>${title}</title>
 <link rel="icon" href="/icon.png" />
 <style>
-  :root { --bg: #f5f7fa; --card: #fff; --text: #1d2129; --muted: #5f6673; --line: #dde1e7; --input: #fff; --soft: #f0f2f5; --accent: #e8743b; --accent-soft: #fdeee6; --err: #c4320a; --ok: #1f7a4d; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #14161a; --card: #1d2026; --text: #e8eaed; --muted: #9aa1ad; --line: #2e333b; --input: #16181d; --soft: #24282f; --accent-soft: #3a2a20; --err: #ff8a65; --ok: #6fcf97; } }
+  /* Gleiche Farben wie die App („Graphit & Petrol“) */
+  :root { --bg: #f2f4f7; --card: #fff; --text: #1b1f27; --muted: #56637a; --line: #dfe3ea; --input: #fff; --soft: #f2f4f7; --accent: #0e7c86; --on-accent: #fff; --accent-soft: #e2f0f1; --err: #c2334a; --ok: #1f7a4d; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #12151b; --card: #1b1f27; --text: #f2f4f7; --muted: #9ca4b2; --line: #2e3540; --input: #161a21; --soft: #252b35; --accent: #4fc1c9; --on-accent: #0b1417; --accent-soft: #1d3a3e; --err: #ff7a8a; --ok: #5dd39e; } }
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); font: 15px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif; }
   .center { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
@@ -26,9 +27,9 @@ export function page(nonce, title, body, script, { wide = false } = {}) {
   label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 6px; }
   input, select { width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--input); color: var(--text); font: inherit; }
   input[type=checkbox] { width: auto; margin-right: 6px; }
-  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input:focus, select:focus { outline: 2px solid #0e7c86; outline-offset: 1px; }
   button, .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; }
-  button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   button.block { width: 100%; margin-top: 16px; padding: 11px; }
   button.sm { padding: 5px 10px; font-size: 13px; }
   button.danger { color: var(--err); }

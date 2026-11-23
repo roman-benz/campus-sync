@@ -33,7 +33,7 @@ struct MensaView: View {
                                         .foregroundStyle(on ? .white : .primary)
                                         .overlay(alignment: .topTrailing) {
                                             if mensa.orders.contains(where: { $0.date == d.date }) {
-                                                Image(systemName: "checkmark.circle.fill").font(.caption).foregroundStyle(.green).offset(x: 4, y: -4)
+                                                Image(systemName: "checkmark.circle.fill").font(.caption).foregroundStyle(Color.pMid).offset(x: 4, y: -4)
                                             }
                                         }
                                     }
@@ -51,7 +51,7 @@ struct MensaView: View {
                         Section("Bestellt") {
                             ForEach(done) { o in
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Label("Nr. \(o.no)", systemImage: "checkmark.seal.fill").font(.subheadline.bold()).foregroundStyle(.green)
+                                    Label("Nr. \(o.no)", systemImage: "checkmark.seal.fill").font(.subheadline.bold()).foregroundStyle(Color.pMid)
                                     Text(o.items.map { "\($0.n)× \($0.title)" }.joined(separator: ", ")).font(.callout)
                                     Text("Abholung \(o.time)–\(o.until) Uhr · Abholschein an \(o.email)").font(.caption).foregroundStyle(.secondary)
                                 }
@@ -104,7 +104,7 @@ struct MensaView: View {
                             .font(.headline)
                             .padding(.horizontal, 18).padding(.vertical, 14)
                             .background(brand, in: RoundedRectangle(cornerRadius: 16))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Color.onInk)
                         }
                         .padding(.horizontal).padding(.bottom, 6)
                     }
@@ -192,7 +192,7 @@ struct DishRow: View {
                 if n > 0 {
                     Text("\(n)")
                         .font(.caption.bold().monospacedDigit())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.onInk)
                         .frame(minWidth: 22, minHeight: 22)
                         .background(brand, in: Circle())
                         .offset(x: 6, y: -6)
@@ -207,8 +207,8 @@ struct DishRow: View {
                     Text(fmtEuro(price)).font(.subheadline.monospacedDigit().bold()).foregroundStyle(brand)
                     ForEach(dish.tags.filter(\.diet).prefix(2), id: \.code) { t in DietBadge(tag: t) }
                     if order != nil {
-                        if soldOut { Text("ausverkauft").font(.caption2.bold()).foregroundStyle(.red) }
-                        else if let s = stock, s.live <= 15 { Text("noch \(s.live)").font(.caption2.bold()).foregroundStyle(.orange) }
+                        if soldOut { Text("ausverkauft").font(.caption2.bold()).foregroundStyle(Color.ink) }
+                        else if let s = stock, s.live <= 15 { Text("noch \(s.live)").font(.caption2.bold()).foregroundStyle(Color.ink) }
                     }
                 }
             }
@@ -239,7 +239,7 @@ struct DishRow: View {
             if n > 0 { Button(role: .destructive) { change(-n) } label: { Label("Aus dem Warenkorb", systemImage: "trash") } }
         }
         .swipeActions(edge: .trailing) {
-            Button { showInfo = true } label: { Label("Details", systemImage: "info.circle") }.tint(.gray)
+            Button { showInfo = true } label: { Label("Details", systemImage: "info.circle") }.tint(Color.pMid)
         }
         .sensoryFeedback(.increase, trigger: bump)
         .sheet(isPresented: $showInfo) {
@@ -271,8 +271,8 @@ struct DietBadge: View {
     var body: some View {
         let green = tag.code == "VEG" || tag.code == "V"
         Text(tag.text).font(.caption2.bold()).padding(.horizontal, 6).padding(.vertical, 2)
-            .background((green ? Color.green : Color.orange).opacity(0.15), in: Capsule())
-            .foregroundStyle(green ? .green : .orange)
+            .background((green ? Color.pMid : Color.ink).opacity(0.15), in: Capsule())
+            .foregroundStyle(green ? Color.ink : Color.inkSecondary)
     }
 }
 
@@ -320,7 +320,7 @@ struct SlotButton: View {
 
     var body: some View {
         let full = slot.free <= 0
-        let fill: Color = on ? brand : good ? Color.green.opacity(0.15) : Color(.secondarySystemFill)
+        let fill: Color = on ? brand : good ? Color.softFill : Color(.secondarySystemFill)
         let text: Color = on ? .white : full ? .secondary : .primary
         Button(action: action) {
             VStack(spacing: 1) {
@@ -329,7 +329,7 @@ struct SlotButton: View {
             }
             .frame(maxWidth: .infinity, minHeight: 44)
             .background(fill, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(good && !on ? Color.green : Color.clear, lineWidth: 1.5))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(good && !on ? Color.pMid : Color.clear, lineWidth: 1.5))
             .foregroundStyle(text)
         }
         .buttonStyle(.plain)
@@ -399,7 +399,7 @@ struct OrderSheet: View {
                 }
                 Section {
                     if !opts.message.isEmpty {
-                        Label(opts.message, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                        Label(opts.message, systemImage: "exclamationmark.triangle").foregroundStyle(Color.ink)
                     } else if opts.slots.isEmpty {
                         Text("Für diesen Tag gibt es keine Abholzeiten.").foregroundStyle(.secondary)
                     } else {
@@ -432,7 +432,7 @@ struct OrderSheet: View {
                 } header: { Text("Deine Daten") } footer: {
                     Text("Name und E-Mail bleiben auf dem iPhone und gehen nur bei einer Bestellung an my-mensa.")
                 }
-                if let error { Section { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) } }
+                if let error { Section { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Color.ink) } }
                 Section {
                     Button {
                         confirm = true

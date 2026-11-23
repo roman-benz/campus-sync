@@ -68,6 +68,13 @@ function demoIcs() {
         `DESCRIPTION:Personen: ${who.replace(',', '\\,')} Ressourcen: ${room}`, 'END:VEVENT');
     });
   }
+  // Eine Vorlesung läuft gerade, eine kommt heute noch (für „Jetzt im Unterricht“)
+  const r5 = (ms) => new Date(Math.round(ms / 300000) * 300000);
+  const live = [[-40, 50, 'Digitaltechnik (HiC)', 'B105', 'Hiller, Carl'], [100, 190, 'Programmieren in C', 'Labor 2', 'Weber, Tom']];
+  live.forEach(([a, b, title, room, who], i) => {
+    lines.push('BEGIN:VEVENT', `UID:demo-live-${i}`, `DTSTART:${utc(r5(Date.now() + a * 60000))}`, `DTEND:${utc(r5(Date.now() + b * 60000))}`, `SUMMARY:${title}`, `LOCATION:${room}`,
+      `DESCRIPTION:Personen: ${who.replace(',', '\\,')} Ressourcen: ${room}`, 'END:VEVENT');
+  });
   return lines.concat('END:VCALENDAR').join('\r\n');
 }
 
@@ -77,6 +84,8 @@ function seed() {
   const downloadDir = path.join(root, 'Moodle');
   store.setSettings({ siteUrl: SITE, downloadDir, syncIntervalMin: 240, notifications: false, runInBackground: false, aiProvider: 'claude' });
   store.setSecret('moodleToken', 'demo-token');
+  store.setSecret('dualisUser', 'demo');
+  store.setSecret('dualisPass', 'demo');
   store.setSecret('anthropicKey', 'sk-ant-demo-nur-anzeige');
   // Passkey-Zugang vortäuschen; die Prüfung beim Server beantwortet der fetch-Stub unten
   const demoUser = { name: 'Demo', isAdmin: false };
@@ -86,6 +95,7 @@ function seed() {
   const realFetch = globalThis.fetch;
   globalThis.fetch = (url, opts) => {
     if (String(url).endsWith('/api/auth/me')) return Promise.resolve(new Response(JSON.stringify({ user: demoUser }), { headers: { 'Content-Type': 'application/json' } }));
+    if (String(url).startsWith('https://dualis.dhbw.de')) return Promise.reject(new Error('Demo: Dualis nicht erreichbar'));
     if (String(url) === DEMO_ICS) return Promise.resolve(new Response(demoIcs(), { headers: { 'Content-Type': 'text/calendar' } }));
     return realFetch(url, opts);
   };
@@ -346,9 +356,81 @@ async function shots() {
     await snap('24-seite-erklaeren');
   };
 
+  // Neues Design: alle Bereiche hell und dunkel, dazu Verschieben in die nächste Woche per Maus
+  const designShots = async () => {
+    const mouse = (type, x, y) => win.webContents.sendInputEvent({ type, x, y, button: 'left', clickCount: 1, modifiers: type === 'mouseMove' ? ['leftButtonDown'] : [] });
+    const goTo = async (route) => { await run(`go(${JSON.stringify(route)})`); await wait(1200); };
+    for (const theme of ['light', 'dark']) {
+      await run(`document.documentElement.dataset.theme = '${theme}'`);
+      await goTo('dashboard');
+      await snap(`d-${theme}-01-uebersicht`);
+      await goTo('courses');
+      await snap(`d-${theme}-02-kurse`);
+      await run(`go('course', { id: 11, tab: 'content' })`);
+      await wait(900);
+      await snap(`d-${theme}-03-kurs`);
+      await goTo('timetable');
+      await snap(`d-${theme}-04-stundenplan`);
+      await goTo('grades');
+      await wait(800);
+      await snap(`d-${theme}-05-noten`);
+      await goTo('mensa');
+      await wait(1500);
+      await snap(`d-${theme}-06-mensa`);
+    }
+    await run(`document.documentElement.dataset.theme = 'light'`);
+    await goTo('timetable');
+    // Projektmanagement (Fr) in die nächste Woche ziehen: rechts auf der Leiste verweilen, dann auf Mo 10:00
+    await run(`document.querySelector('.tt-scroll').scrollTop = 7.5 * 54`);
+    await wait(200);
+    const p = await run(`(() => {
+      const b = [...document.querySelectorAll('button.tt-ev')].find((x) => x.textContent.includes('Projektmanagement')).getBoundingClientRect();
+      const rail = document.querySelector('.tt-rail').getBoundingClientRect();
+      return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + 12), rx: Math.round(rail.left + rail.width / 2), ry: Math.round(b.top + 40) };
+    })()`);
+    mouse('mouseDown', p.x, p.y);
+    for (let i = 1; i <= 12; i++) { mouse('mouseMove', Math.round(p.x + ((p.rx - p.x) * i) / 12), Math.round(p.y + ((p.ry - p.y) * i) / 12)); await wait(25); }
+    await wait(300);
+    await snap('d-07-ziehen-wochenrand');
+    await wait(800);
+    console.log('WOCHE NACH VERWEILEN', await run('ttIsoWeek(S.tt.week)'));
+    const t = await run(`(() => { const c = document.querySelectorAll('.tt-col[data-day]')[0].querySelector('.tt-body').getBoundingClientRect(); return { x: Math.round(c.left + c.width / 2), y: Math.round(c.top + 10 * ${54} + 12) }; })()`);
+    for (let i = 1; i <= 12; i++) { mouse('mouseMove', Math.round(p.rx + ((t.x - p.rx) * i) / 12), Math.round(p.ry + ((t.y - p.ry) * i) / 12)); await wait(25); }
+    await snap('d-08-ziehen-naechste-woche');
+    mouse('mouseUp', t.x, t.y);
+    await wait(700);
+    console.log('VERSCHOBEN', await run(`JSON.stringify(Object.values(ttMoves()).map((m) => [m.title, TTP.span(m.start, m.end), TTP.span(m.newStart, m.newEnd)]))`));
+    await snap('d-09-verschoben-naechste-woche');
+    // Vergangene Stunde (Mo) lässt sich nicht ziehen
+    await run(`S.tt.week = ttMonday(new Date()); loadTimetable()`);
+    await wait(900);
+    await run(`document.querySelector('.tt-scroll').scrollTop = 7.5 * 54`);
+    await wait(200);
+    const old = await run(`(() => { const b = [...document.querySelectorAll('button.tt-ev')].find((x) => x.textContent.includes('Mathematik II')).getBoundingClientRect(); return { x: Math.round(b.left + 30), y: Math.round(b.top + 12) }; })()`);
+    mouse('mouseDown', old.x, old.y);
+    for (let i = 1; i <= 6; i++) { mouse('mouseMove', old.x + i * 20, old.y + i * 10); await wait(25); }
+    mouse('mouseUp', old.x + 120, old.y + 60);
+    await wait(500);
+    console.log('VERGANGEN GEZOGEN, Verschiebungen:', await run('Object.keys(ttMoves()).length'));
+    await snap('d-10-vergangen-gesperrt');
+    // Detailfenster mit „Verschieben auf …“
+    await run(`[...document.querySelectorAll('button.tt-ev')].find((x) => x.textContent.includes('Programmieren')).click()`);
+    await wait(600);
+    await snap('d-11-detail-verschieben');
+    await run('closeModal()');
+    // Schmales Fenster
+    win.setSize(1024, 760);
+    await goTo('dashboard');
+    await snap('d-12-schmal-uebersicht');
+  };
+
   win.setSize(1440, 900);
   win.show();
   await wait(1500);
+  if (process.argv.includes('--design')) {
+    await designShots();
+    return app.exit(0);
+  }
   if (process.argv.includes('--img')) {
     await imgShots();
     return app.exit(0);
@@ -457,4 +539,23 @@ app.whenReady().then(() => {
   seed();
   if (shotsDir) setTimeout(() => shots().catch((e) => { console.error(e); app.exit(1); }), 2500);
 });
+// Vor dem Start der App schreiben: Dualis liest seinen Zwischenspeicher beim Laden, und der Stundenplan
+// soll frisch geladen werden (die Demo-Vorlesungen hängen von der aktuellen Uhrzeit ab)
+function seedEarly() {
+  const store = require('../src/main/store');
+  fs.rmSync(store.file(path.join('cache', 'timetables', 'demo.json')), { force: true });
+  // Noten aus Dualis (Beispiel)
+  const dm = (no, name, grade, credits, status = grade ? 'bestanden' : 'offen') => ({ no, name, date: null, credits, grade, status });
+  store.writeJson(store.file(path.join('cache', 'dualis.json')), { fetchedAt: Date.now() - 25 * 60 * 1000, data: {
+    program: 'Elektrotechnik – Automation (Demo)',
+    groups: [
+      { title: 'Kernmodule', sum: { credits: 40 }, modules: [dm('T3ELG1001', 'Mathematik I', '1,7', 8), dm('T3ELG1002', 'Grundlagen der Elektrotechnik I', '2,3', 10), dm('T3ELG1003', 'Digitaltechnik', '1,3', 5), dm('T3ELG1004', 'Programmieren', '1,0', 5), dm('T3ELG1005', 'Physik', '2,0', 5), dm('T3ELG1006', 'Mathematik II', null, 7)] },
+      { title: 'Schlüsselqualifikationen', sum: { credits: 5 }, modules: [dm('T3_1000', 'Wissenschaftliches Arbeiten', '1,5', 5)] },
+    ],
+    total: { credits: 38 }, required: 210, gpa: { total: '1,7', major: '1,8' },
+  } });
+
+}
+
+seedEarly();
 require('../src/main/main.js');

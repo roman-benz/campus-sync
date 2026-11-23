@@ -9,6 +9,11 @@ struct SettingsView: View {
     @EnvironmentObject private var tt: Timetables
     @EnvironmentObject private var mensa: MensaStore
     @EnvironmentObject private var index: DocIndex
+    @EnvironmentObject private var dualis: DualisStore
+    @EnvironmentObject private var notifier: Notifier
+    @AppStorage("notifyGrades") private var notifyGrades = true
+    @AppStorage("notifyFiles") private var notifyFiles = true
+    @AppStorage("notifyDeadlines") private var notifyDeadlines = true
     @AppStorage("autoDownload") private var autoDownload = true
     @AppStorage("maxFileSizeMB") private var maxFileSizeMB = 200
     @AppStorage("chatgptModel") private var model = ""
@@ -37,10 +42,32 @@ struct SettingsView: View {
             } header: { Text("Synchronisation") } footer: {
                 Text("Die Kursdateien liegen in der Dateien-App unter „Auf meinem iPhone → Chadoodle“.")
             }
+            Section {
+                Toggle("Neue Noten", isOn: $notifyGrades)
+                Toggle("Neue Dateien", isOn: $notifyFiles)
+                Toggle("Fristen-Erinnerungen", isOn: $notifyDeadlines)
+                    .onChange(of: notifyDeadlines) { _, _ in Task { await notifier.scheduleDeadlines(app.cache.events) } }
+                if notifier.authorized == false {
+                    Button("Mitteilungen in iOS erlauben") {
+                        if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) }
+                    }
+                }
+            } header: { Text("Mitteilungen") } footer: {
+                Text("iOS weckt Chadoodle regelmäßig im Hintergrund; neue Noten aus Dualis und neue Kursdateien kommen dann als Mitteilung. Fristen werden einen Tag und zwei Stunden vorher gemeldet. Voraussetzung: Hintergrundaktualisierung ist in den iOS-Einstellungen an.")
+            }
+            Section("Noten (Dualis)") {
+                if dualis.configured {
+                    LabeledContent("Verbunden als", value: dualis.user ?? "")
+                    if let c = dualis.cache { LabeledContent("Stand", value: relTime(c.fetchedAt)) }
+                    Button("Dualis trennen", role: .destructive) { dualis.disconnect() }
+                } else {
+                    Text("Im Reiter „Noten“ mit Dualis verbinden.").foregroundStyle(Color.inkSecondary)
+                }
+            }
             Section("KI-Assistent (ChatGPT)") {
                 if chatgpt.signedIn {
                     LabeledContent("Verbunden", value: chatgpt.account?.email ?? chatgpt.account?.name ?? "ChatGPT-Konto")
-                    if !chatgpt.planUsage { Text("Plan-Nutzung nicht freigegeben").font(.caption).foregroundStyle(.orange) }
+                    if !chatgpt.planUsage { Text("Plan-Nutzung nicht freigegeben").font(.caption).foregroundStyle(Color.ink) }
                     Picker("Modell", selection: $model) {
                         Text("Automatisch").tag("")
                         ForEach(assistant.models, id: \.id) { m in Text(m.name).tag(m.id) }
@@ -58,7 +85,7 @@ struct SettingsView: View {
                             do { try await chatgpt.login() } catch WebAuth.Cancelled.cancelled {} catch { chatgptError = error.localizedDescription }
                         }
                     }
-                    if let chatgptError { Text(chatgptError).font(.caption).foregroundStyle(.red) }
+                    if let chatgptError { Text(chatgptError).font(.caption).foregroundStyle(Color.ink) }
                 }
             }
             Section("Stundenpläne") {
@@ -85,7 +112,7 @@ struct SettingsView: View {
                             do { try await mensa.setUrl(mensaUrl) } catch { mensaError = error.localizedDescription }
                         }
                     }
-                if let mensaError { Text(mensaError).font(.caption).foregroundStyle(.red) }
+                if let mensaError { Text(mensaError).font(.caption).foregroundStyle(Color.ink) }
             } header: { Text("Mensa") } footer: {
                 Text("Link der Mensa-Seite auf my-mensa.de, z. B. …/mensatogo.php?mensa=mensa_fallenbrunnen")
             }
@@ -98,6 +125,7 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Einstellungen")
+        .task { await notifier.refreshAuthorization() }
         .confirmationDialog("Von Moodle abmelden?", isPresented: $confirmLogout, titleVisibility: .visible) {
             Button("Abmelden und Dateien löschen", role: .destructive) { app.signOut(deleteFiles: true) }
             Button("Abmelden, Dateien behalten") { app.signOut(deleteFiles: false) }
