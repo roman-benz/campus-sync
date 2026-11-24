@@ -18,6 +18,32 @@ test('Vorlesung wird dem passenden Moodle-Kurs zugeordnet', () => {
   assert.equal(INS.courseFor('Digitaltechnik Labor', courses).id, 12);
 });
 
+test('Dozentenkürzel entscheidet bei ähnlichen Kursnamen', () => {
+  const ks = [
+    { id: 1, fullname: 'TSA25 - Systems Engineering Kfz (PAP)', lastaccess: 900 },
+    { id: 2, fullname: 'TSA/TSL25 - Signale und Systeme (BAM)', lastaccess: 100 },
+    { id: 3, fullname: 'TSA/TSL25 - Elektrotechnik 2 (BAM)', lastaccess: 950 },
+    { id: 4, fullname: 'TSA25 - Embedded Systeme im Kfz (PAP)', lastaccess: 100 },
+    { id: 5, fullname: 'TSA25 - Embedded Systeme und Echtzeitsysteme (HAF)', lastaccess: 900 },
+    { id: 6, fullname: 'TSA/TFE25 - Fahrzeugelektrik (HEC/LUF)' },
+    { id: 7, fullname: 'TSA/TFE25 - Einführung Konstruktionslehre und Platinendesign (HEC/LUF)' },
+  ];
+  assert.equal(INS.courseFor('Systemtheorie (BaM)', ks).id, 2);
+  assert.equal(INS.courseFor('Systems Engineering im Kfz (PAp)', ks).id, 1);
+  assert.equal(INS.courseFor('Embedded Systeme (PAp)', ks).id, 4);
+  assert.equal(INS.courseFor('LABOR Embedded Systeme und Echtzeitsysteme (HaF)', ks).id, 5);
+  assert.equal(INS.courseFor('Fahrzeugelektrik (LuF)', ks).id, 6);
+  // anderer Dozent, aber eindeutiger Name: trotzdem zugeordnet
+  assert.equal(INS.courseFor('Konstruktionslehre und Platinendesign (HeL)', ks).id, 7);
+  // Klausurtermine mit angehängten Kursgruppen
+  ks.push({ id: 8, fullname: 'TSA/TFE25 - Fahrzeugtechnik und Fahrzeugelektrik (MET)' });
+  assert.equal(INS.courseFor('Klausur Signale und Systeme   FN-TSA25, FN-TSL25', ks).id, 2);
+  assert.equal(INS.courseFor('Klausur Fahrzeugtechnik + Fahrzeugelektrik (120 min.)   FN-TSA25', ks).id, 8);
+  assert.equal(INS.cleanTitle('Klausur Elektronik   FN-TSA25, FN-TSL25, FN-TFE23-1'), 'Klausur Elektronik');
+  // gleicher Dozent allein reicht nicht
+  assert.equal(INS.courseFor('Simulationstechnik (BAM)', ks), null);
+});
+
 test('Ohne passenden Kurs gibt es keine Zuordnung', () => {
   assert.equal(INS.courseFor('Projektmanagement', courses), null);
   assert.equal(INS.courseFor('Physik', courses), null);

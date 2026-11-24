@@ -19,7 +19,8 @@
   // passen selten wörtlich. Verglichen werden die Wörter (ohne Füllwörter), Teilwörter zählen halb,
   // eine abweichende Nummer (I/II, 1/2) spricht klar dagegen.
   const STOP = new Set(['und', 'der', 'die', 'das', 'des', 'den', 'dem', 'fuer', 'mit', 'von', 'zur', 'zum', 'im', 'in', 'an', 'auf', 'am',
-    'the', 'and', 'of', 'for', 'to', 'teil', 'vorlesung', 'uebung', 'labor', 'seminar', 'tutorium', 'klausur', 'pruefung', 'kurs', 'grundlagen']);
+    'the', 'and', 'of', 'for', 'to', 'teil', 'vorlesung', 'uebung', 'labor', 'seminar', 'tutorium', 'klausur', 'pruefung', 'kurs', 'grundlagen',
+    'nhk', 'wkl', 'whl']); // Nach-/Wiederholungsklausur
   const ROMAN = { i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8, ix: 9, x: 10 };
   const norm = (s) => String(s || '').toLowerCase()
     .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
@@ -39,13 +40,26 @@
     return { words, nums };
   }
 
-  // Titel ohne Dozentenkürzel und Zusätze in Klammern
-  const cleanTitle = (t) => String(t || '').replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+  // Titel ohne Dozentenkürzel, Zusätze in Klammern und angehängte Kursgruppen („FN-TSA25, FN-TSL25“)
+  const cleanTitle = (t) => String(t || '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\b[A-Z]{2,3}-[A-Z]{3}\d{2}(?:-\d)?\b,?/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+
+  // Dozentenkürzel in Klammern: Rapla schreibt „(BaM)“, Moodle „(BAM)“ oder „(HEC/LUF)“
+  function codes(s) {
+    const out = new Set();
+    for (const [, inner] of String(s || '').matchAll(/\(([^)]*)\)/g)) {
+      for (const p of inner.split(/[\s/,&+]+/)) if (/^[A-Za-zÄÖÜäöü]{2,4}$/.test(p)) out.add(norm(p));
+    }
+    return out;
+  }
 
   function matchScore(title, course) {
     const a = tokens(cleanTitle(title));
     if (!a.words.length) return 0;
-    const b = tokens(`${course.fullname || ''} ${course.shortname || ''}`);
+    const name = `${course.fullname || ''} ${course.shortname || ''}`;
+    const b = tokens(name);
     const set = new Set(b.words);
     let hit = 0;
     for (const w of a.words) {
@@ -54,6 +68,11 @@
     }
     let s = hit / a.words.length;
     if (a.nums.size && b.nums.size) s += [...a.nums].some((n) => b.nums.has(n)) ? 0.15 : -0.6;
+    // Gleicher Dozent entscheidet bei ähnlichen Namen („Systemtheorie (BaM)“ → „Signale und Systeme (BAM)“,
+    // nicht „Systems Engineering (PAP)“). Ohne jeden Worttreffer reicht der Dozent allein nicht.
+    const ca = codes(title);
+    const cb = codes(name);
+    if (hit > 0 && ca.size && cb.size) s += [...ca].some((c) => cb.has(c)) ? 0.5 : -0.3;
     return s;
   }
 
